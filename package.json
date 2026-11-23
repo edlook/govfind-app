@@ -1,0 +1,32 @@
+{
+  "name": "govfind",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "GOVfind: öffentliche Einrichtungen in Deutschland (statische PWA, ohne Server)",
+  "engines": {
+    "node": ">=20.19"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "npm run i18n && tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "i18n": "node scripts/build-i18n.mjs",
+    "data": "node scripts/build-data.mjs",
+    "icons": "node scripts/make-icons.mjs",
+    "test": "node --test scripts/tests/"
+  },
+  "dependencies": {
+    "@fontsource/outfit": "^5.3.0",
+    "maplibre-gl": "^6.19.0",
+    "opening_hours": "^3.16.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "osm-pbf-parser-node": "^1.1.4",
+    "playwright-core": "^1.65.1",
+    "typescript": "~5.9",
+    "vite": "^6.4.6"
+  }
+}

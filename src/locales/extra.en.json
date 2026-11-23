@@ -1,0 +1,7 @@
+{
+  "common.skip_link": "Skip to content",
+  "history.title": "Search history",
+  "list.zoom_hint": "Zoom in on the map or choose a place to see facilities.",
+  "coverage.note": "Data currently available for: {regions}. More regions will follow.",
+  "coverage.no_data_place": "There is no facility data for {place} yet. Currently available: {regions}."
+}

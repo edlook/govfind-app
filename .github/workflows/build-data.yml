@@ -1,0 +1,82 @@
+# ENTWURF: Datenaufbereitung für ganz Deutschland (16 Bundesländer, Geofabrik-Länderauszüge -> public/data) und Deploy auf GitHub Pages.
+# Nicht aktiviert und NICHT in Actions getestet (lokal wurde derselbe Ablauf Stufe für Stufe ausgeführt, siehe README).
+# Vor Aktivierung: Repository anlegen, Pages (Source: GitHub Actions) einschalten, Variablen SITE_URL/BASE_PATH setzen.
+# Daten: ODbL (Share-alike, Attribution) [prüfen].
+#
+# Ablauf:
+#   extract  Matrix über die 16 Länder, max-parallel: 1 (strikt nacheinander, höflich gegenüber download.geofabrik.de).
+#            Pro Land: .osm.pbf laden, streamend lesen (kein Vollladen), Ergebnis <land>.json als Artefakt, .pbf wird gelöscht.
+#            Die .pbf (bis ~1,3 GB) wird bewusst NICHT im Actions-Cache gehalten (10-GB-Limit, würde alles verdrängen);
+#            gecacht wird das kleine Regionsergebnis je Land und Kalenderwoche, so überspringt ein Wiederholungslauf fertige Länder.
+#   merge    Ergebnisse zusammenführen (doppelte IDs Berlin/Bremen verwerfen, adaptive Zellen, Orte/PLZ), App bauen, Pages-Artefakt.
+#   deploy   GitHub Pages.
+name: build-data
+on:
+  schedule:
+    - cron: '17 3 * * 1' # montags 03:17 UTC (Geofabrik aktualisiert täglich; seltener reicht, z. B. monatlich: '17 3 1 * *')
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency: { group: pages, cancel-in-progress: false }
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        region: [berlin, hamburg, bremen, baden-wuerttemberg, bayern, brandenburg, hessen, mecklenburg-vorpommern, niedersachsen, nordrhein-westfalen, rheinland-pfalz, saarland, sachsen, sachsen-anhalt, schleswig-holstein, thueringen]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: npm }
+      - run: npm ci
+      - id: week
+        run: echo "w=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: work/${{ matrix.region }}.json
+          key: region-${{ matrix.region }}-${{ steps.week.outputs.w }}
+      - name: Land lesen (streamend, Speicher unabhängig von der Dateigröße)
+        run: node scripts/build-data.mjs --stage extract --resume --regions ${{ matrix.region }} --work work --cache .cache
+        env: { NODE_OPTIONS: --max-old-space-size=4096 }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: region-${{ matrix.region }}
+          path: work/${{ matrix.region }}.json
+          retention-days: 3
+          compression-level: 6
+
+  merge:
+    needs: extract
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: npm }
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with: { pattern: region-*, path: work, merge-multiple: true }
+      - name: Zusammenführen (alle 16 Länder müssen vorliegen, sonst Abbruch)
+        run: node scripts/build-data.mjs --stage merge --work work
+        env: { NODE_OPTIONS: --max-old-space-size=6144 }
+      - run: npm test
+      - run: npm run build
+        env:
+          BASE_PATH: ${{ vars.BASE_PATH || '/' }}
+          SITE_URL: ${{ vars.SITE_URL }}
+      - uses: actions/upload-artifact@v4
+        with: { name: data, path: public/data, retention-days: 7 }
+      - uses: actions/upload-pages-artifact@v3
+        with: { path: dist }
+
+  deploy:
+    needs: merge
+    runs-on: ubuntu-latest
+    permissions: { pages: write, id-token: write }
+    environment: { name: github-pages, url: '${{ steps.d.outputs.page_url }}' }
+    steps:
+      - id: d
+        uses: actions/deploy-pages@v4

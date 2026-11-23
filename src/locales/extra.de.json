@@ -1,0 +1,7 @@
+{
+  "common.skip_link": "Zum Inhalt springen",
+  "history.title": "Suchverlauf",
+  "list.zoom_hint": "Zoomen Sie in die Karte oder wählen Sie einen Ort, um Einrichtungen zu sehen.",
+  "coverage.note": "Aktueller Datenstand: {regions}. Weitere Regionen folgen.",
+  "coverage.no_data_place": "Für {place} liegen noch keine Einrichtungsdaten vor. Aktuell verfügbar: {regions}."
+}
