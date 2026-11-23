@@ -76,6 +76,18 @@ Beim Start lädt die App nur `index.json` + `places-meta.json` (17 KB). Eine Suc
 - **Sicherheit:** DOM nur über `h()` (textContent), URL-Schemata geprüft (http/https), CSP-Meta im Build (`vite.config.ts`), keine Inline-Handler.
 - **PWA:** `manifest.webmanifest`, Icons (`npm run icons`), Service Worker (generiert aus `src/sw-template.js`): Shell vorab, Datenkacheln stale-while-revalidate, Index network-first. Kartenkacheln werden nicht gecacht.
 
+## SEO und Vorab-Rendering (`scripts/prerender.mjs`, aufgerufen von `vite.config.ts` nach dem Build)
+Ohne Server sehen Suchmaschinen sonst nur die leere App-Hülle. Der Build erzeugt deshalb statische Seiten aus `public/data` und `src/locales` (de + en, hreflang, canonical, Sitemaps):
+- **Startseite, `/datenquellen`, `/hilfe`, `/notfall`, `/impressum`, `/datenschutz`:** App-Hülle mit eigenem title/description/H1 und Text in `#shell` (die App ersetzt ihn beim Start). Vorher lieferte GitHub Pages `/en/` und diese Pfade nur über `404.html` mit Status 404 aus.
+- **`/kategorie/<unterkategorie>/`** (alle Unterkategorien mit Daten) und **`/stadt/<slug>/`** (Top-N Städte nach Zahl der Einrichtungen mit Adress-Stadt, mindestens `PRERENDER_MIN_CITY`) sowie **`/stadt/<slug>/<kategorie>/`** (Behörden-Unterkategorien mit mindestens `PRERENDER_MIN_CITY_SUB` Einrichtungen): reines HTML ohne JavaScript (`public/seo.css`), Link „In der Karte öffnen“ in die App. Dünne Seiten werden nicht erzeugt (statt `noindex`).
+- **`/einrichtung/<id>-<slug>/`:** nur Behörden/Fachämter/Justiz in diesen Städten (Obergrenze `PRERENDER_PLACES`) und nur mit mindestens einer Angabe (Adresse, Telefon, Web, Zeiten). App-Hülle + JSON-LD (nur belegte Felder; `openingHoursSpecification` nur bei `ohs=ok` und strengem Teilparser). `<meta name="govfind:place">` trägt die Datenzelle, damit der Deep-Link ohne `?c=` die Einrichtung findet. Alle anderen Einrichtungen bleiben nur in der App erreichbar (kein Indexieren).
+- **Grenzen:** `PRERENDER_CITIES` (150), `PRERENDER_PLACES` (4000), `PRERENDER_MIN_CITY` (10), `PRERENDER_MIN_CITY_SUB` (3), `PRERENDER_LIST_MAX` (150); `PRERENDER=0` erzeugt nur Startseite und App-Seiten. Die Build-Ausgabe nennt Dateizahl und Größe („prerender: …“).
+- **Sitemaps:** `sitemap.xml` (Index) + `sitemap-seiten|kategorie|stadt|einrichtung.xml`, nur mit `SITE_URL`. `robots.txt` sperrt App-Zustände (`/suche`, `/favoriten`, `/verlauf`, `/einstellungen`, `/mehr`, `…/route`, `…/fehler-melden`; zusätzlich `noindex`). Bei Projektseiten (`/repo/`) wird `robots.txt` vom Hoster nur im Domain-Root gelesen.
+- **`TRAILING_SLASH=0`:** URLs ohne „/“ am Ende (Cloudflare Pages); Standard mit „/“ (GitHub Pages). Muss zum Hoster passen, sonst widersprechen canonical und Redirect einander.
+- **Städte:** Zählung nach `addr:city` der Einrichtung (Berlin/Hamburg: ganze Region). Einrichtungen ohne Stadtangabe (ca. 36 % ohne Adresse) fehlen in den Stadtseiten. Gleichnamige Orte im selben Bundesland werden zusammengefasst, in verschiedenen Ländern mit Kürzel getrennt (`neustadt-he`).
+- **Client:** `src/app.ts` setzt title/description/og/twitter, `canonical`/`hreflang`/`og:url` (mit `SITE_URL`) und `robots` je Route; versteckte H1 in der Karten-/Listenansicht; JSON-LD aus dem Vorab-Rendering wird bei App-Navigation entfernt.
+- **Karte lazy:** MapLibre steckt im eigenen Chunk (`import('./map')` in `initApp`), die Shell rendert vorher; Marker-Stil liegt in `src/marker-style.ts`. `<link rel="preconnect">` zum Kachel-Anbieter steht im Seitenkopf der App-Seiten.
+
 ## Karte und Dienste (Bedingungen, Stand 2026-11-20)
 - **Kacheln: OpenFreeMap** (`src/provider.ts`, eine Datei). Kostenlos, ohne Schlüssel und ohne Registrierung; Attribution „OpenFreeMap © OpenMapTiles Data from OpenStreetMap“ + „© OpenStreetMap contributors“ liegt auf der Karte. Laut ToS: kein automatisiertes Absaugen, Offline-Downloads max. 3000 Kacheln/50 MB. Kann Cloudflare als CDN nutzen, ohne Garantie („as is“). **[prüfen]** Verlässlichkeit für „wie ein Uhrwerk“; Alternativen: PMTiles-Selbsthosting (siehe Doku von OpenFreeMap/Protomaps), MapTiler mit öffentlichem Schlüssel. Datenschutz s06 nennt OpenFreeMap (Hyperknot Software Kft.).
 - **Route in der App: nicht umgesetzt.** OSRM-Demo/routing.openstreetmap.de: „reasonable, non-commercial use, ≤ 1 request/s, no guarantees“, also kein Produktivdienst. Stattdessen Luftlinie + Deeplinks (Google Maps `maps/dir/?api=1`, Apple Karten, Android `geo:`).
@@ -90,6 +102,6 @@ GitHub Pages (Actions-Entwurf mit Matrix über 16 Länder + Merge: `.github/work
 ## Offen / [prüfen]
 - **Impressum ist Platzhalter, Datenschutz ist Entwurf** (Platzhalter in eckigen Klammern sind sichtbar markiert). Nicht produktiv ohne juristische Prüfung und Eigentümerdaten. Kontakt-E-Mail: `src/config.ts` `CONTACT_EMAIL` (leer = kein Mail-Link).
 - Hoster (Logs, Datenschutz s03), Domain, Marke/Name. PVOG und Destatis nicht eingebunden (Lizenz/Zugang offen).
-- SEO: SPA ohne Vorab-Rendering; Seiten `/stadt/…`, `/kategorie/…` und JSON-LD fehlen. Titel/Description je Route aus `site-copy.md`.
+- SEO: siehe Abschnitt „SEO und Vorab-Rendering“. Offen: `/stadt/<slug>/<kategorie>` nur für Behörden-Unterkategorien; Impressum/Datenschutz sind `noindex`, bis sie final sind.
 - Karten-Beschriftung folgt dem Stil des Anbieters (nicht an die App-Sprache gebunden).
 - Details siehe Abschlussbericht.

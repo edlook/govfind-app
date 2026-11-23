@@ -1,9 +1,10 @@
 import { AttributionControl, Map as MLMap, setWorkerUrl, type GeoJSONSource, type MapGeoJSONFeature, type StyleSpecification } from 'maplibre-gl';
 import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { GROUPS, GROUP_BY_SLUG, GROUP_OF, SUB_BY_SLUG, SUB_COLOR } from '../shared/taxonomy.js';
+import { GROUPS } from '../shared/taxonomy.js';
 import { GERMANY_CENTER, OSM_ATTRIBUTION, TILE_PROVIDER } from './config';
 import { placeCell } from './data';
+import { colorOfSub, glyphColorOn, glyphOfSub, markerKey, markerStyle } from './marker-style';
 import { iconPath } from './ui/icons';
 import type { LatLng, Place } from './types';
 
@@ -16,25 +17,8 @@ export interface MapEvents {
   onError: (msg: string) => void;
 }
 
-const lum = (hex: string): number => {
-  const c = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255).map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
-  return 0.2126 * c[0]! + 0.7152 * c[1]! + 0.0722 * c[2]!;
-};
-const contrast = (a: string, b: string): number => { const [x, y] = [lum(a), lum(b)]; return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
-
-export function markerKey(sub: string): string {
-  const g = GROUP_OF[sub] ?? 'behoerden';
-  return ['polizei', 'feuerwehr', 'rettungsdienst', 'post', 'bahnhof', 'verkehrsbetriebe'].includes(sub) ? sub : g;
-}
-export function markerStyle(key: string): { color: string; glyph: string; shape: 'pin' | 'square' } {
-  const sub = SUB_BY_SLUG[key];
-  const g = GROUP_BY_SLUG[key] ?? GROUP_BY_SLUG[sub?.group ?? 'behoerden']!;
-  return { color: SUB_COLOR[key as keyof typeof SUB_COLOR] ?? g.color, glyph: sub?.glyph ?? g.glyph, shape: g.shape as 'pin' | 'square' };
-}
-/** Farbe der Kategorie (für Listen-Icons) */
-export const colorOfSub = (sub: string): string => markerStyle(markerKey(sub)).color;
-export const glyphOfSub = (sub: string): string => markerStyle(markerKey(sub)).glyph;
-export const glyphColorOn = (bg: string): string => (contrast('#ffffff', bg) >= 3 ? '#ffffff' : '#0f1117');
+// Marker-Stil liegt in marker-style.ts (kein MapLibre im Start-Chunk); hier nur Re-Export für bestehende Importe.
+export { colorOfSub, glyphColorOn, glyphOfSub, markerKey, markerStyle };
 
 function markerSvg(key: string): string {
   const { color, glyph, shape } = markerStyle(key);

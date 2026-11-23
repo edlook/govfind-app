@@ -3,5 +3,16 @@
   "history.title": "Search history",
   "list.zoom_hint": "Zoom in on the map or choose a place to see facilities.",
   "coverage.note": "Data currently available for: {regions}. More regions will follow.",
-  "coverage.no_data_place": "There is no facility data for {place} yet. Currently available: {regions}."
+  "seo.cta.open_app": "Open on the map",
+  "seo.cities.title": "Cities with government offices and facilities | GOVfind",
+  "seo.cities.h1": "Cities with government offices and facilities",
+  "seo.cities.description": "Cities in Germany with government offices and public facilities from open data: addresses, contact details, source and data date.",
+  "seo.categories.title": "Government offices and facilities by category | GOVfind",
+  "seo.categories.h1": "Categories",
+  "seo.categories.description": "All categories of government offices and public facilities in Germany: citizens' office, tax office, police, court and more.",
+  "seo.place.description_nocity": "{name}, {subcategory}. Source: OpenStreetMap, data as of {date}.",
+  "coverage.no_data_place": "There is no facility data for {place} yet. Currently available: {regions}.",
+  "search.where.near": "near {place}",
+  "search.where.ambiguous": "There are several places called “{place}”. Showing the largest. Did you mean:",
+  "map.chips.nearby": "Near me"
 }

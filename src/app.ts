@@ -2,11 +2,12 @@ import { GROUPS } from '../shared/taxonomy.js';
 import { setIndexForNotes } from './app-data';
 import { A, S, emit, on, type SheetState } from './ctx';
 import { MIN_ZOOM_FOR_DATA } from './config';
-import { cellCenter, cellsForBbox, distanceKm, loadCells, loadIndex, loadMeta } from './data';
+import { addressLine, cellCenter, cellsForBbox, distanceKm, loadCells, loadIndex, loadMeta } from './data';
 import { activeFilterCount, emptyFilters, matches, parseKat, serializeKat, subsOfGroup, type Filters } from './filters';
 import { loadHours } from './hours';
-import { getLang, has, onLangChange, t } from './i18n';
-import { MapController, type Bounds } from './map';
+import { fmtDate, getLang, has, onLangChange, t } from './i18n';
+import type { Bounds, MapController as MapCtl } from './map'; // MapLibre wird erst in initApp per import('./map') nachgeladen (eigener Chunk)
+import { fitDescription, fitTitle, pagePath, placePath } from '../shared/seo.js';
 import { getRoute, href, navigate, onRoute, replaceQuery, startRouter, type Route } from './router';
 import { runSearch } from './search';
 import { addHistory, getSettings } from './storage';
@@ -74,6 +75,7 @@ function buildShell(): void {
   const banners = h('div', { class: 'banners' });
   const app = h('div', { class: 'app', 'data-sheet': 'peek' },
     h('a', { class: 'skip', href: '#panel-content', onclick: (e: Event) => { e.preventDefault(); body.focus(); } }, t('common.skip_link')),
+    h('h1', { class: 'visually-hidden', id: 'app-h1' }, t('seo.home.h1')), // einzige H1 der Karten-/Listenansicht (andere Ansichten haben eigene H1)
     topbar, chips, mapEl, ctl, searchArea, banners, panel, tabs);
   replace(shell, app);
   R = { app, panel, body, handle, chips, mapEl, tabs, banners, searchArea, inline };
@@ -85,6 +87,7 @@ function paintChips(): void {
   const n = activeFilterCount(S.filters);
   replace(R.chips,
     h('button', { class: ['chip', 'chip-filter', n ? 'on' : ''], type: 'button', onclick: () => A.openFilter() }, icon('filter', { size: 18 }), n ? t('map.chips.filter_count', { count: n }) : t('map.chips.filter')),
+    h('button', { class: 'chip chip-nearby', type: 'button', onclick: () => A.nearby() }, icon('locate', { size: 18 }), t('map.chips.nearby')),
     GROUPS.map((g) => {
       const subs = subsOfGroup(g.slug); const sel = subs.filter((s) => S.filters.subs.has(s)).length;
       const b = h('button', { class: ['chip', sel ? 'on' : ''], type: 'button', 'aria-pressed': sel === subs.length ? 'true' : sel ? 'mixed' : 'false', onclick: () => A.toggleGroup(g.slug) },
@@ -318,9 +321,9 @@ function renderPanel(): void {
       if (S.mode === 'browse' && !S.userLoc && S.geo !== 'denied') b.querySelector('.list-head')?.after(nearbyCta());
       break;
     }
-    case 'place': void renderPlace(b, r.id!, r.q.get('c'), onPlaceLoaded); return;
-    case 'route': void renderRoute(b, r.id!, r.q.get('c'), onPlaceLoaded); return;
-    case 'report': void renderReport(b, r.id!, r.q.get('c'), onPlaceLoaded); return;
+    case 'place': void renderPlace(b, r.id!, cellHint(r.id, r.q.get('c')), onPlaceLoaded); return;
+    case 'route': void renderRoute(b, r.id!, cellHint(r.id, r.q.get('c')), onPlaceLoaded); return;
+    case 'report': void renderReport(b, r.id!, cellHint(r.id, r.q.get('c')), onPlaceLoaded); return;
     case 'favorites': renderFavorites(b); break;
     case 'history': renderHistory(b); break;
     case 'settings': renderSettings(b); break;
@@ -343,7 +346,8 @@ function onPlaceLoaded(p: Place | null): void {
   currentPlace = p;
   if (!p) { S.map?.setSelected(null); return; }
   S.map?.setSelected(p);
-  setTitle('place', { name: p.nm, city: p.a?.c ?? '', subcategory: t(`categories.sub.${p.s}`), address: '', date: '' });
+  setPlaceMeta(p);
+  if (getRoute().name === 'place') syncLinks(placePath(p));
   const z = Math.max(S.mapView?.zoom ?? 0, 15);
   S.map?.flyTo({ lat: p.la, lng: p.ln }, z, sheetPad());
   if (getRoute().name !== 'route') S.map?.setRoute(null, null);
@@ -355,14 +359,73 @@ function setMeta(name: string, content: string, attr = 'name'): void {
   if (!m) { m = document.createElement('meta'); m.setAttribute(attr, name); document.head.appendChild(m); }
   m.content = content;
 }
+function applyMeta(title: string, desc: string): void {
+  document.title = title;
+  setMeta('description', desc); setMeta('og:title', title, 'property'); setMeta('og:description', desc, 'property');
+  setMeta('twitter:title', title); setMeta('twitter:description', desc);
+  setMeta('og:locale', getLang() === 'de' ? 'de_DE' : 'en_US', 'property');
+}
 function setTitle(kind: string, p: Record<string, string> = {}): void {
-  let title = t(`seo.${kind}.title`, p); const short = `seo.${kind}.title_short`;
-  if (title.length > 60 && has(short)) title = t(short, p);
-  const desc = has(`seo.${kind}.description`) ? t(`seo.${kind}.description`, p) : t('seo.home.description');
-  document.title = title; setMeta('description', desc); setMeta('og:title', title, 'property'); setMeta('og:description', desc, 'property');
+  const title = fitTitle(t(`seo.${kind}.title`, p), has(`seo.${kind}.title_short`) ? t(`seo.${kind}.title_short`, p) : '');
+  const desc = fitDescription(has(`seo.${kind}.description`) ? t(`seo.${kind}.description`, p) : t('seo.home.description'));
+  applyMeta(title, desc);
+}
+/** Titel/Description einer Einrichtung (gleiche Vorlagen wie das Vorab-Rendering in scripts/prerender.mjs) */
+function setPlaceMeta(p: Place): void {
+  const city = p.a?.c ?? ''; const addr = addressLine(p);
+  const fill = (date: string): void => {
+    const params = { name: p.nm, city, subcategory: t(`categories.sub.${p.s}`), address: addr ?? '', date };
+    const title = city ? fitTitle(t('seo.place.title', params), t('seo.place.title_short', params)) : fitTitle(`${p.nm} | ${t('common.app.name')}`, p.nm);
+    const key = !city ? 'seo.place.description_nocity' : addr ? 'seo.place.description' : 'seo.place.description_noaddr';
+    applyMeta(title, fitDescription(t(key, params)));
+  };
+  void loadMeta().then((m) => fill(fmtDate(m.stand))).catch(() => fill(''));
 }
 const SEO_KIND: Partial<Record<Route['name'], string>> = { map: 'home', search: 'home', sources: 'sources', help: 'help', emergency: 'emergency', imprint: 'imprint', privacy: 'privacy' };
-const NOINDEX = new Set(['search', 'route', 'report', 'favorites', 'history', 'settings', 'more', 'notfound']);
+// Impressum/Datenschutz sind Entwürfe mit Platzhaltern: nicht indexieren, bis sie final sind (shared/seo.js NOINDEX_STATIC beachten)
+const NOINDEX = new Set(['search', 'route', 'report', 'favorites', 'history', 'settings', 'more', 'notfound', 'imprint', 'privacy']);
+// Titel für Ansichten ohne SEO-Vorlage (Tab-Titel/Screenreader); nur wenn der Schlüssel existiert
+const PLAIN_TITLE: Partial<Record<Route['name'], string>> = { favorites: 'nav.header.favorites', history: 'history.title', settings: 'nav.more.settings', more: 'nav.more.title' };
+const CANONICAL_PATH: Partial<Record<Route['name'], string>> = { map: '/', sources: '/datenquellen', help: '/hilfe', emergency: '/notfall' };
+
+/** canonical, hreflang und og:url der aktuellen Ansicht (Client-Seite; das Vorab-Rendering setzt sie für direkt aufgerufene Seiten). */
+function syncLinks(path: string | null): void {
+  document.head.querySelectorAll('link[rel="canonical"], link[rel="alternate"][hreflang]').forEach((n) => n.remove());
+  document.head.querySelector('meta[property="og:url"]')?.remove();
+  if (!__SITE_ORIGIN__ || !path) return;
+  const url = (l: string): string => __SITE_ORIGIN__ + pagePath(l, path, __TRAILING_SLASH__);
+  const add = (rel: string, href: string, hreflang?: string): void => {
+    const l = document.createElement('link'); l.rel = rel; l.href = href; if (hreflang) l.hreflang = hreflang; document.head.appendChild(l);
+  };
+  add('canonical', url(getLang()));
+  for (const l of ['de', 'en']) add('alternate', url(l), l);
+  add('alternate', url('de'), 'x-default');
+  setMeta('og:url', url(getLang()), 'property');
+}
+function syncLinksFor(r: Route): void {
+  if (r.name === 'place') return; // setzt onPlaceLoaded (kanonischer Pfad mit Namens-Slug)
+  syncLinks(NOINDEX.has(r.name) ? null : CANONICAL_PATH[r.name] ?? null);
+}
+/** Zelle der vorab gerenderten Detailseite (<meta name="govfind:place" content="n123 24_203">): Deep-Link ohne ?c= */
+const PRE_PLACE = (document.querySelector<HTMLMetaElement>('meta[name="govfind:place"]')?.content ?? '').split(' ');
+const cellHint = (id: string | undefined, q: string | null): string | null => {
+  if (q) return q;
+  const [preId, preCell] = PRE_PLACE;
+  return id && preId === id && preCell ? preCell : null;
+};
+
+/** Seiten ohne SEO-Titel (noindex): Titel aus Überschrift bzw. Suchbegriffen, damit Tab/Verlauf/Screenreader die Seite unterscheiden. */
+function setPageTitle(r: Route): void {
+  const key: Partial<Record<Route['name'], string>> = { notfound: 'errors.page.404.title' }; // Favoriten/Verlauf/Einstellungen/Mehr: PLAIN_TITLE (SEO)
+  const k = key[r.name];
+  if (k) { document.title = `${t(k)} | ${t('common.app.name')}`; return; }
+  if (r.name === 'search') {
+    const w = r.q.get('was'); const o = r.q.get('wo');
+    const what = [w, r.q.get('nearby') === '1' ? t('nav.header.nearby') : o].filter(Boolean).join(' · ');
+    if (what) document.title = `${what} | ${t('common.app.name')}`;
+    else document.title = `${t('list.title')} | ${t('common.app.name')}`;
+  }
+}
 
 // ---------- Routing ----------
 function tabFor(r: Route): string {
@@ -375,8 +438,13 @@ let first = true;
 function handleRoute(r: Route): void {
   const prevMode = S.mode;
   document.querySelectorAll('.tab').forEach((a) => { if ((a as HTMLElement).dataset.tab === tabFor(r)) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); });
-  setMeta('robots', NOINDEX.has(r.name) ? 'noindex' : 'index,follow');
+  setMeta('robots', NOINDEX.has(r.name) ? 'noindex,follow' : 'index,follow');
   const kind = SEO_KIND[r.name]; if (kind) setTitle(kind);
+  else if (PLAIN_TITLE[r.name] && has(PLAIN_TITLE[r.name]!)) applyMeta(`${t(PLAIN_TITLE[r.name]!)} | ${t('common.app.name')}`, t('seo.home.description'));
+  syncLinksFor(r);
+  syncH1(r);
+  // JSON-LD aus dem Vorab-Rendering gehört nur zur zuerst geladenen Seite: bei App-Navigation entfernen (sonst falsche Daten)
+  if (!first) document.head.querySelectorAll('script[data-prerender-ld]').forEach((n) => n.remove());
   if (r.name !== 'route') S.map?.setRoute(null, null);
   if (r.name !== 'place' && r.name !== 'route' && r.name !== 'report') S.map?.setSelected(null);
   if (r.name === 'map' || r.name === 'search') {
@@ -409,10 +477,13 @@ function handleRoute(r: Route): void {
       if (!isDesktop()) setSheet('full'); renderPanel();
   }
   void prevMode;
+  setPageTitle(r);
   if (!first && !['map', 'search'].includes(r.name)) requestAnimationFrame(() => { const hd = R.body.querySelector<HTMLElement>('h1,h2'); if (hd) { hd.tabIndex = -1; hd.focus({ preventScroll: true }); } });
   first = false;
 }
 async function refreshBrowseKeep(): Promise<void> { if (S.mode === 'browse') await refreshBrowse(); }
+/** Versteckte H1 nur in Karten-/Listenansicht (alle anderen Ansichten bringen ihre eigene H1 mit) */
+function syncH1(r: Route): void { const el = document.getElementById('app-h1'); if (el) el.hidden = !(r.name === 'map' || r.name === 'search'); }
 
 // ---------- Banner (offline, update, veraltet) ----------
 function paintBanners(): void {
@@ -426,26 +497,48 @@ let updateReady: (() => void) | null = null;
 let staleDate: string | null = null;
 export function notifyUpdate(apply: () => void): void { updateReady = apply; if (R) paintBanners(); }
 
+/** Zustand nachtragen, der entstand, bevor der Karten-Chunk geladen war (Treffer, Standort, gewählte Einrichtung) */
+function syncMapState(m: MapCtl): void {
+  if (S.userLoc) m.setUser(S.userLoc);
+  const list = S.mode === 'results' && S.res ? S.res.items.map((i) => i.p) : S.browse;
+  if (list.length) m.setData(list);
+  const r = getRoute();
+  if (currentPlace && (r.name === 'place' || r.name === 'route' || r.name === 'report')) {
+    m.setSelected(currentPlace); m.flyTo({ lat: currentPlace.la, lng: currentPlace.ln }, 15, sheetPad());
+  } else if (S.mode === 'results' && list.length) {
+    let w = 180, s = 90, e = -180, n = -90;
+    for (const p of list.slice(0, 120)) { w = Math.min(w, p.ln); e = Math.max(e, p.ln); s = Math.min(s, p.la); n = Math.max(n, p.la); }
+    if (e - w < 0.002 && n - s < 0.002) m.flyTo({ lat: s, lng: w }, 15, sheetPad()); else m.fitBounds([w, s, e, n] as Bounds, sheetPad());
+  }
+}
+
 // ---------- Init ----------
 export async function initApp(): Promise<void> {
-  Object.assign(A, { openSearch, closeOverlay: closeOverlayIfOpen, submitSearch, nearby: () => { void nearby(); }, locate, openFilter: () => openFilterDialog(), toggleSub, toggleGroup, setFilters, setSheet, toast, announce, refreshAll, searchHref, applyTheme });
+  Object.assign(A, { openSearch, closeOverlay: closeOverlayIfOpen, submitSearch, nearby: () => { void nearby(); }, locate, openFilter: () => openFilterDialog(), toggleSub, toggleGroup, setFilters, setSheet, toast, announce, refreshAll, retry: () => { if (S.mode === 'results' && getRoute().name === 'search') void doSearch(); else void refreshBrowse(); }, searchHref, applyTheme });
   buildShell();
-  S.map = new MapController(R.mapEl, effectiveTheme(), reduce(), {
-    onSelect: (id, cell) => {
-      const known = S.res?.items.find((i) => i.p.id === id)?.p ?? S.browse.find((p) => p.id === id);
-      navigate(`/einrichtung/${id}${known ? '-' + slugify(known.nm) : ''}?c=${cell}`);
-    },
-    onMoved: ({ center, zoom, bounds, user }) => {
-      S.mapView = { center, zoom, bounds };
-      const r = getRoute();
-      if (S.mode === 'results' && user && (r.name === 'search' || r.name === 'map') && zoom >= MIN_ZOOM_FOR_DATA) R.searchArea.hidden = false;
-      if (S.mode === 'browse') debouncedBrowse();
-    },
-    onError: () => { if (S.mapOk) { S.mapOk = false; toast(t('errors.tiles.unavailable'), { ms: 7000 }); } },
-  });
   const debouncedBrowse = debounce(() => { void refreshBrowse(); }, 250);
+  // MapLibre (~344 KB gzip) kommt in einen eigenen Chunk und wird erst nach dem Aufbau der Shell geladen: Shell, Liste und
+  // Vorab-Text blockieren nicht auf die Karte. Bis dahin ist S.map null (alle Zugriffe sind optional: S.map?.…).
+  void import('./map').then(({ MapController }) => {
+    const m = new MapController(document.getElementById('map') ?? R.mapEl, effectiveTheme(), reduce(), {
+      onSelect: (id, cell) => {
+        const known = S.res?.items.find((i) => i.p.id === id)?.p ?? S.browse.find((p) => p.id === id);
+        navigate(`/einrichtung/${id}${known ? '-' + slugify(known.nm) : ''}?c=${cell}`);
+      },
+      onMoved: ({ center, zoom, bounds, user }) => {
+        S.mapView = { center, zoom, bounds };
+        const r = getRoute();
+        if (S.mode === 'results' && user && (r.name === 'search' || r.name === 'map') && zoom >= MIN_ZOOM_FOR_DATA) R.searchArea.hidden = false;
+        if (S.mode === 'browse') debouncedBrowse();
+      },
+      onError: () => { if (S.mapOk) { S.mapOk = false; toast(t('errors.tiles.unavailable'), { ms: 7000 }); } },
+    });
+    S.map = m;
+    applyTheme();
+    syncMapState(m);
+    void m.ready.then(() => { const v = m.view(); S.mapView = { center: v.center, zoom: v.zoom, bounds: v.bounds }; void refreshBrowse(); });
+  }).catch(() => { S.mapOk = false; toast(t('errors.tiles.unavailable'), { ms: 7000 }); });
   applyTheme();
-  void S.map.ready.then(() => { const v = S.map!.view(); S.mapView = { center: v.center, zoom: v.zoom, bounds: v.bounds }; void refreshBrowse(); });
   window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => { if (getSettings().theme === 'system') applyTheme(); });
   window.addEventListener('online', () => { S.online = true; paintBanners(); announce(t('errors.offline.back_online')); });
   window.addEventListener('offline', () => { S.online = false; paintBanners(); });
@@ -485,6 +578,8 @@ function handleRouteAgain(): void {
   document.querySelectorAll('.tab').forEach((a) => { if ((a as HTMLElement).dataset.tab === tabFor(r)) a.setAttribute('aria-current', 'page'); });
   R.app.dataset.view = r.name; R.app.dataset.sheet = S.sheet;
   const kind = SEO_KIND[r.name]; if (kind) setTitle(kind);
+  syncLinksFor(r); syncH1(r); document.documentElement.lang = getLang();
+  if (currentPlace && r.name === 'place') { setPlaceMeta(currentPlace); syncLinks(placePath(currentPlace)); }
   if (S.resState === 'loading' && (r.name === 'search')) { void doSearch(); return; }
   renderPanel();
 }

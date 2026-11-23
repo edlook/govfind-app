@@ -67,7 +67,7 @@ export function renderList(host: HTMLElement): void {
     if (S.resState === 'loading') state = 'loading';
     else if (S.resState === 'error') state = 'error';
     else if (S.res?.kind === 'wo_not_found') state = 'wo_not_found';
-    else { items = S.res?.items ?? []; state = items.length ? 'ok' : 'empty'; }
+    else { items = S.res?.items ?? []; state = items.length ? 'ok' : S.res?.failedCells ? 'error' : 'empty'; } // leer wegen Ladefehler (offline, Chunk fehlt) ist kein "keine Treffer"
   } else {
     if (S.browseState === 'loading' || S.browseState === 'idle') state = 'loading';
     else if (S.browseState === 'zoom') state = 'zoom';
@@ -98,9 +98,15 @@ export function renderList(host: HTMLElement): void {
   }
   const fc = filterChips();
   const wrap = h('div', { class: 'list' }, head, fc);
+  // Gleichnamige Orte (z. B. 27x "Neustadt"): Auswahl anbieten
+  if (results && (state === 'ok' || state === 'empty') && S.res?.woAlts?.length) {
+    const place = S.res.woText.split(',')[0]!.trim();
+    wrap.append(h('div', { class: 'ambiguous' }, h('p', { class: 'meta' }, t('search.where.ambiguous', { place })),
+      h('div', { class: 'row-actions' }, S.res.woAlts.slice(0, 6).map((a) => h('button', { class: 'btn', type: 'button', onclick: () => A.submitSearch(S.was, a.value) }, `${a.label} · ${t('search.where.near', { place: a.qual })}`)))));
+  }
 
   if (state === 'loading') body.append(h('p', { class: 'visually-hidden', role: 'status' }, t('errors.loading.label')), skeletonRows(6));
-  else if (state === 'error') body.append(banner('error', t('errors.generic.title'), null, [h('button', { class: 'btn', type: 'button', onclick: () => A.refreshAll() }, t('errors.generic.retry'))]));
+  else if (state === 'error') body.append(banner('error', t('errors.generic.title'), S.online ? null : t('errors.offline.banner_no_date'), [h('button', { class: 'btn', type: 'button', onclick: () => A.retry() }, t('errors.generic.retry'))]));
   else if (state === 'zoom') body.append(h('p', { class: 'hint' }, t('list.zoom_hint')), coverageNote());
   else if (state === 'wo_not_found') {
     const r = S.res!;
@@ -119,7 +125,8 @@ export function renderList(host: HTMLElement): void {
   } else {
     if (results && S.res) {
       const r = S.res;
-      if (r.similar.length && r.wasSubs.length) wrap.append(h('p', { class: 'meta' }, t('search.synonym_notice', { term: r.similar.map(subLabel).join(', ') })));
+      const sim = r.similar.filter((x) => r.items.some((i) => i.p.s === x)); // Hinweis nur für ähnliche Arten, die tatsächlich in der Liste vorkommen
+      if (sim.length && r.wasSubs.length) wrap.append(h('p', { class: 'meta' }, t('search.synonym_notice', { term: sim.map(subLabel).join(', ') })));
       if (r.radiusKm) wrap.append(h('p', { class: 'meta' }, t('map.radius.info', { km: fmtNumber(r.radiusKm) })));
       if (r.truncated) wrap.append(banner('warn', t('errors.partial.title'), t('errors.partial.limit', { shown: r.items.length, total: r.total }), [h('button', { class: 'btn', type: 'button', onclick: () => A.setSheet('peek') }, t('errors.partial.zoom'))]));
       else if (r.failedCells) wrap.append(banner('warn', t('errors.partial.title'), t('errors.partial.region')));

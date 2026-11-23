@@ -23,7 +23,10 @@ export const appleDir = (p: Place, m: TravelMode): string => `https://maps.apple
 export const geoUri = (p: Place): string => `geo:${p.la},${p.ln}?q=${p.la},${p.ln}(${encodeURIComponent(p.nm)})`;
 /** Bewertungen: Suche per Name + Adresse (ohne Places-API, ohne Schlüssel) */
 export function googleReviews(p: Place): string {
-  const q = [p.nm, addressLine(p) ?? ''].filter(Boolean).join(' ');
+  // Straße nicht doppelt senden, wenn sie schon im Namen steht ("Bürgeramt Klosterstraße")
+  const addr = addressLine(p) ?? '';
+  const street = addr.split(',')[0]!.replace(/\s+\d.*$/, '');
+  const q = [p.nm, street && p.nm.includes(street) ? addr.slice(street.length).replace(/^\s+/, '') : addr].filter(Boolean).join(' ');
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`;
 }
 const osmType = (p: Place): string => ({ n: 'node', w: 'way', r: 'relation' } as const)[p.id[0] as 'n' | 'w' | 'r'];

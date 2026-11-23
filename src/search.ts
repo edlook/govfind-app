@@ -52,12 +52,46 @@ export function matchWas(q: string): WasMatch {
   return { direct, similar };
 }
 
+// Relevanz: OSM-Typen sind verrauscht (z. B. Luftamt oder Tiefbau-Referat unter "Straßenverkehrsamt", Tourismus-Büro unter "Bürgeramt").
+// Pro Unterkategorie prüfen Namenshinweise (normalisiert, ue/ae/oe/ss): t0 = passt eindeutig, t1 = wahrscheinlich, sonst drop (nicht zeigen) bzw. weiter unten.
+const BUERGER_T0 = /buerger(amt|buero|service|dienst|center|zentrum|ber)|meldeamt|einwohnermelde|kundenzentrum|ankommens|anmeldung|buergeramt|stadtbezirksamt|ortsamt|buergerb/;
+const HINTS: Record<string, { t0: RegExp; t1?: RegExp; drop: boolean }> = {
+  strassenverkehrsamt: { t0: /zulass|fahrerlaubnis|fuehrerschein|kfz|kraftfahr|strassenverkehrsamt|verkehrsamt/, t1: /verkehr/, drop: true },
+  buergeramt: { t0: BUERGER_T0, t1: /rathaus|stadtverwaltung|gemeinde|buerger|bezirksamt|verwaltung/, drop: true },
+  buergerbuero: { t0: BUERGER_T0, drop: false },
+  einwohnermeldeamt: { t0: BUERGER_T0, drop: false },
+  rathaus: { t0: /rathaus|stadtverwaltung|gemeindeverwaltung|gemeindeamt|bezirksamt|ortsamt|verwaltung|marktgemeinde|amtsverwaltung/, drop: false },
+};
+const AUTH = new Set(['behoerden', 'fachaemter', 'justiz', 'sicherheit']); // Verwaltungs-Gruppen: untereinander austauschbar
+/** 0 = passt, 1 = schwächer, 2 = nicht anzeigen */
+function relevanceTier(p: Place, wasN: string, subs: Set<string>, direct: Set<string>): 0 | 1 | 2 {
+  if (!wasN) return 0;
+  const n = nameNorm(p);
+  if (n.includes(wasN)) {
+    // Name enthält den Begriff: gleiche Gruppe wie die gesuchte Art = passt; "Frauenarztpraxis am Rathaus" bei "Rathaus" nur nachrangig
+    if (!subs.size || subs.has(p.s)) return 0;
+    const groups = new Set([...subs].map((x) => GROUP_OF[x]));
+    const g = GROUP_OF[p.s]!;
+    return groups.has(g) || (AUTH.has(g) && [...groups].some((x) => AUTH.has(x!))) ? 0 : 1;
+  }
+  const hint = HINTS[p.s];
+  if (!hint) return direct.has(p.s) ? 0 : 1;
+  if (hint.t0.test(n)) {
+    // "Zulassungsstelle" gesucht: Führerscheinstellen sind zweitrangig
+    if (p.s === 'strassenverkehrsamt' && /zulass|kfz|kennzeichen/.test(wasN) && !/zulass|kfz|kraftfahr/.test(n)) return 1;
+    return 0;
+  }
+  if (hint.t1?.test(n)) return 1;
+  return hint.drop ? 2 : 1;
+}
+
 const nameNorms = new WeakMap<Place, string>();
 const nameNorm = (p: Place): string => { let v = nameNorms.get(p); if (v === undefined) { v = norm(p.nm); nameNorms.set(p, v); } return v; };
 
 // ---------- Wo? ----------
+export interface WoAlt { label: string; qual: string; value: string }
 export type WoRes =
-  | { kind: 'place'; row: PlaceRow; label: string }
+  | { kind: 'place'; row: PlaceRow; label: string; alts: WoAlt[] }
   | { kind: 'plz'; plz: string; lat: number; lng: number; label: string }
   | { kind: 'none'; suggestion: string | null };
 
@@ -70,23 +104,61 @@ const lev = (a: string, b: string): number => {
   return dp[a.length]![b.length]!;
 };
 
-let placeNorm: { idx: Gazetteer; norms: string[] } | null = null;
-const norms = (idx: Gazetteer): string[] => { if (placeNorm?.idx !== idx) placeNorm = { idx, norms: idx.places.map((p) => norm(p[0])) }; return placeNorm.norms; };
+let placeNorm: { idx: Gazetteer; norms: string[]; bigs: PlaceRow[] } | null = null;
+const cache = (idx: Gazetteer): { norms: string[]; bigs: PlaceRow[] } => {
+  if (placeNorm?.idx !== idx) placeNorm = { idx, norms: idx.places.map((p) => norm(p[0])), bigs: idx.places.filter((p) => (p[4] ?? 0) >= 50000 && (p[3] === 'c' || p[3] === 't')) };
+  return placeNorm;
+};
+const norms = (idx: Gazetteer): string[] => cache(idx).norms;
 const KIND_RANK: Record<string, number> = { c: 0, t: 1, s: 2, v: 3, n: 4 };
 const rowScore = (r: PlaceRow): number => (r[4] ?? 0) * 10 - KIND_RANK[r[3]]! * 100;
+const km = (a: PlaceRow, b: PlaceRow): number => distanceKm({ lat: a[1], lng: a[2] }, { lat: b[1], lng: b[2] });
 
+/** Unterscheidungszusatz für gleichnamige Orte: nächste größere Stadt ("Neustadt, nahe Bremen"). Gazetteer hat kein Bundesland, daher Nähe zu einer Großstadt. */
+function nearLabel(idx: Gazetteer, r: PlaceRow): string {
+  let best: PlaceRow | null = null; let bd = Infinity;
+  for (const b of cache(idx).bigs) { if (b[0] === r[0]) continue; const d = km(r, b); if (d < bd) { bd = d; best = b; } }
+  return best ? best[0] : '';
+}
+const NEAR_RX = /^(?:nahe|near|bei)\s+/;
+
+/** Wo-Eingabe auflösen. "Neustadt, nahe Bremen" wählt gezielt einen von mehreren gleichnamigen Orten; Alternativen stehen in alts. */
 export function resolveWo(idx: Gazetteer, text: string): WoRes {
-  const q = norm(text.replace(/,.*$/, ''));
+  const parts = text.split(',');
+  const q = norm(parts[0]!);
+  const qual = parts.length > 1 ? norm(parts.slice(1).join(',')).replace(NEAR_RX, '') : '';
   if (/^\d{5}$/.test(q)) {
     const e = idx.plz.find((x) => x[0] === q);
     if (e) return { kind: 'plz', plz: q, lat: e[1], lng: e[2], label: q };
     return { kind: 'none', suggestion: null };
   }
   const ns = norms(idx);
+  const cands: number[] = [];
+  for (let i = 0; i < ns.length; i++) if (ns[i] === q) cands.push(i);
   let best: number | null = null;
-  for (let i = 0; i < ns.length; i++) if (ns[i] === q && (best === null || rowScore(idx.places[i]!) > rowScore(idx.places[best]!))) best = i;
+  for (const i of cands) if (best === null || rowScore(idx.places[i]!) > rowScore(idx.places[best]!)) best = i;
+  let alts: WoAlt[] = [];
+  if (cands.length > 1 && (best === null || (idx.places[best]![4] ?? 0) < 100000)) { // Großstadt wie Berlin: kein Rückfragen wegen gleichnamiger Dörfer
+    // gleichnamige Orte >8 km voneinander = verschiedene Orte
+    const distinct: PlaceRow[] = [];
+    for (const i of cands.sort((a, b) => rowScore(idx.places[b]!) - rowScore(idx.places[a]!))) { const r = idx.places[i]!; if (distinct.every((d) => km(d, r) > 8)) distinct.push(r); }
+    if (distinct.length > 1) {
+      const seen = new Map<string, number>();
+      alts = distinct.slice(0, 8).map((r) => { let near = nearLabel(idx, r); const n = (seen.get(near) ?? 0) + 1; seen.set(near, n); if (n > 1) near = `${near} ${n}`; return { label: r[0], qual: near, value: near ? `${r[0]}, nahe ${near}` : r[0] }; });
+      if (qual) {
+        const pick = distinct.findIndex((_, k) => norm(alts[k]!.qual) === qual);
+        if (pick >= 0) { const r = distinct[pick]!; best = idx.places.indexOf(r); alts = alts.filter((_, k) => k !== pick); }
+      }
+    }
+  }
   if (best === null) for (let i = 0; i < ns.length; i++) if (ns[i]!.startsWith(q) && q.length >= 3 && (best === null || rowScore(idx.places[i]!) > rowScore(idx.places[best]!))) best = i;
-  if (best !== null) { const r = idx.places[best]!; return { kind: 'place', row: r, label: r[0] }; }
+  // Tippfehler: ein Präfix-Treffer auf einen winzigen Ort ("Muenchn" -> Weiler) ist schlechter als der Vorschlag "München"
+  if (best !== null && cands.length === 0 && (idx.places[best]![4] ?? 0) < 20000 && q.length >= 5) {
+    let sg: PlaceRow | null = null; let sd = 3;
+    for (let i = 0; i < ns.length; i++) { const d = lev(q, ns[i]!); if (d < sd || (d === sd && sg !== null && rowScore(idx.places[i]!) > rowScore(sg))) { sd = d; sg = idx.places[i]!; } }
+    if (sg && sd <= 2 && (sg[4] ?? 0) >= 20000) return { kind: 'none', suggestion: sg[0] };
+  }
+  if (best !== null) { const r = idx.places[best]!; return { kind: 'place', row: r, label: r[0], alts }; }
   let sug: string | null = null; let bd = 3;
   if (q.length >= 4) for (let i = 0; i < ns.length; i++) { const d = lev(q, ns[i]!); if (d < bd || (d === bd && sug !== null && rowScore(idx.places[i]!) > 0 && d <= 2)) { bd = d; sug = idx.places[i]![0]; if (d === 1) break; } }
   return { kind: 'none', suggestion: bd <= 2 ? sug : null };
@@ -106,7 +178,14 @@ export function suggestWo(idx: Gazetteer, text: string, limit = 8): { label: str
   hits.sort((a, b) => b.s - a.s);
   const seen = new Set<string>();
   const out: { label: string; sub: string; value: string }[] = [];
-  for (const h of hits) { if (seen.has(h.r[0])) continue; seen.add(h.r[0]); out.push({ label: h.r[0], sub: '', value: h.r[0] }); if (out.length >= limit) break; }
+  for (const h of hits) {
+    if (seen.has(h.r[0])) continue; seen.add(h.r[0]);
+    // gleichnamige Orte einzeln mit Zusatz anbieten ("Neustadt · nahe Bremen")
+    const rw = norm(h.r[0]) === q ? resolveWo(idx, h.r[0]) : null;
+    if (rw && rw.kind === 'place' && rw.alts.length) { for (const a of rw.alts.slice(0, 5)) out.push({ label: a.label, sub: t('search.where.near', { place: a.qual }), value: a.value }); }
+    else out.push({ label: h.r[0], sub: '', value: h.r[0] });
+    if (out.length >= limit) break;
+  }
   return out;
 }
 
@@ -133,7 +212,7 @@ export interface SearchOutput {
   kind: 'ok' | 'wo_not_found';
   items: ResultItem[]; total: number; truncated: boolean; failedCells: number;
   radiusKm: number | null; center: LatLng | null; regionId: string | null; label: string | null; ref: LatLng | null;
-  suggestion: string | null; woNoData: boolean; similar: string[]; wasSubs: string[]; woText: string;
+  suggestion: string | null; woNoData: boolean; similar: string[]; wasSubs: string[]; woText: string; woAlts: WoAlt[];
 }
 
 function baseRadius(r: PlaceRow): number {
@@ -150,8 +229,8 @@ export async function runSearch(inp: SearchInput): Promise<SearchOutput> {
   const wm = was ? matchWas(was) : { direct: new Set<string>(), similar: new Set<string>() };
   const wasSubs = new Set([...wm.direct, ...wm.similar]);
   const wasN = norm(was);
-  const keepWas = (p: Place): boolean => !wasN || wasSubs.has(p.s) || nameNorm(p).includes(wasN);
-  const base: SearchOutput = { kind: 'ok', items: [], total: 0, truncated: false, failedCells: 0, radiusKm: null, center: null, regionId: null, label: null, ref: inp.userLoc, suggestion: null, woNoData: false, similar: [...wm.similar].filter((s) => !wm.direct.has(s)), wasSubs: [...wasSubs], woText: inp.wo };
+  const keepWas = (p: Place): boolean => !wasN || ((wasSubs.has(p.s) || nameNorm(p).includes(wasN)) && relevanceTier(p, wasN, wasSubs, wm.direct) < 2);
+  const base: SearchOutput = { kind: 'ok', items: [], total: 0, truncated: false, failedCells: 0, radiusKm: null, center: null, regionId: null, label: null, ref: inp.userLoc, suggestion: null, woNoData: false, similar: [...wm.similar].filter((s) => !wm.direct.has(s)), wasSubs: [...wasSubs], woText: inp.wo, woAlts: [] };
 
   let center: LatLng | null = null; let region: string | null = null; let startR = 1; let label: string | null = null; let fixedR: number | null = null;
   const wo = inp.wo.trim();
@@ -161,7 +240,7 @@ export async function runSearch(inp: SearchInput): Promise<SearchOutput> {
     if (r.kind === 'none') return { ...base, kind: 'wo_not_found', suggestion: r.suggestion };
     if (r.kind === 'plz') { center = { lat: r.lat, lng: r.lng }; startR = 3; label = r.label; }
     else {
-      center = { lat: r.row[1], lng: r.row[2] }; label = r.row[0];
+      center = { lat: r.row[1], lng: r.row[2] }; label = r.row[0]; base.woAlts = r.alts;
       const reg = r.row[5] ? idx.regions.find((x) => x.id === r.row[5]) : null;
       if (reg) region = reg.id; else startR = baseRadius(r.row);
     }
@@ -196,7 +275,9 @@ export async function runSearch(inp: SearchInput): Promise<SearchOutput> {
 
   const ref = inp.userLoc ?? center;
   const withD: ResultItem[] = items.map((p) => ({ p, d: ref ? distanceKm(ref, { lat: p.la, lng: p.ln }) : null }));
-  withD.sort((a, b) => (a.d !== null && b.d !== null ? a.d - b.d : a.p.nm.localeCompare(b.p.nm, 'de')));
+  const tier = new Map<Place, number>(items.map((p) => [p, relevanceTier(p, wasN, wasSubs, wm.direct)]));
+  // Relevanz zuerst (passender Name/Typ), dann Entfernung
+  withD.sort((a, b) => (tier.get(a.p)! - tier.get(b.p)!) || (a.d !== null && b.d !== null ? a.d - b.d : a.p.nm.localeCompare(b.p.nm, 'de')));
   const total = withD.length;
   return { ...base, items: withD.slice(0, MAX_RESULTS), total, truncated: total > MAX_RESULTS, failedCells: failed, radiusKm, center, regionId: region, label, ref };
 }

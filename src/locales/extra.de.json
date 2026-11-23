@@ -3,5 +3,16 @@
   "history.title": "Suchverlauf",
   "list.zoom_hint": "Zoomen Sie in die Karte oder wählen Sie einen Ort, um Einrichtungen zu sehen.",
   "coverage.note": "Aktueller Datenstand: {regions}. Weitere Regionen folgen.",
-  "coverage.no_data_place": "Für {place} liegen noch keine Einrichtungsdaten vor. Aktuell verfügbar: {regions}."
+  "seo.cta.open_app": "In der Karte öffnen",
+  "seo.cities.title": "Städte mit Behörden und Einrichtungen | GOVfind",
+  "seo.cities.h1": "Städte mit Behörden und Einrichtungen",
+  "seo.cities.description": "Städte in Deutschland mit Behörden und öffentlichen Einrichtungen aus offenen Daten: Adressen, Kontakt, Quelle und Stand.",
+  "seo.categories.title": "Behörden und Einrichtungen nach Kategorie | GOVfind",
+  "seo.categories.h1": "Kategorien",
+  "seo.categories.description": "Alle Kategorien von Behörden und öffentlichen Einrichtungen in Deutschland: Bürgeramt, Finanzamt, Polizei, Gericht und mehr.",
+  "seo.place.description_nocity": "{name}, {subcategory}. Quelle: OpenStreetMap, Stand {date}.",
+  "coverage.no_data_place": "Für {place} liegen noch keine Einrichtungsdaten vor. Aktuell verfügbar: {regions}.",
+  "search.where.near": "nahe {place}",
+  "search.where.ambiguous": "„{place}“ gibt es mehrfach. Angezeigt wird der größte Ort. Meinten Sie:",
+  "map.chips.nearby": "In meiner Nähe"
 }

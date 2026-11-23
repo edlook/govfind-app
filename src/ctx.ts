@@ -46,6 +46,8 @@ export interface Actions {
   toast(text: string, opts?: { action?: { label: string; run: () => void }; ms?: number }): void;
   announce(text: string): void;
   refreshAll(): void;
+  /** Suche bzw. Kartenausschnitt erneut laden (nach Netzfehler) */
+  retry(): void;
   searchHref(): string;
   applyTheme(): void;
 }

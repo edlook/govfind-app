@@ -4,13 +4,15 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig, type Plugin } from 'vite';
 import { TILE_PROVIDER } from './src/provider';
+import { prerender } from './scripts/prerender.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 // Deployment: BASE_PATH (z. B. /govfind/ für GitHub Pages Projektseite), SITE_URL (absolute URL, für hreflang/canonical/sitemap)
+// TRAILING_SLASH=0: URLs ohne "/" am Ende (Cloudflare Pages entfernt ihn per Redirect); Standard 1 (GitHub Pages leitet auf "/" um)
 const base = process.env.BASE_PATH ?? '/';
 const siteUrl = (process.env.SITE_URL ?? '').replace(/\/$/, '');
-const LANGS = ['de', 'en'];
-const PAGES = ['', 'datenquellen', 'hilfe', 'notfall', 'impressum', 'datenschutz'];
+const trailingSlash = process.env.TRAILING_SLASH !== '0';
+const siteOrigin = siteUrl ? `${siteUrl}${base === '/' ? '' : base.replace(/\/$/, '')}` : '';
 
 const csp = (): string => [
   "default-src 'self'",
@@ -28,11 +30,13 @@ const csp = (): string => [
   "form-action 'none'",
 ].join('; ');
 
+const PLACEHOLDER = '<!-- HREFLANG_PLACEHOLDER -->';
+
 function govfind(): Plugin {
-  let html = '';
+  let template = ''; // index.html (CSP, Bundle-Tags) mit Platzhalter; Grundlage für Vorab-Rendering und 404.html
   let outDir = 'dist';
   const precache = new Set<string>();
-  const origin = siteUrl ? `${siteUrl}${base === '/' ? '' : base.replace(/\/$/, '')}` : '';
+  const origin = siteOrigin;
   return {
     name: 'govfind-build',
     apply: 'build',
@@ -40,14 +44,11 @@ function govfind(): Plugin {
     transformIndexHtml: {
       order: 'post',
       handler(src) {
-        let out = src.replace('<head>', `<head>\n  <meta http-equiv="Content-Security-Policy" content="${csp()}" />`);
-        if (siteUrl) {
-          const link = (lang: string, href: string): string => `<link rel="alternate" hreflang="${lang}" href="${href}" />`;
-          const u = (l: string): string => `${origin}${l === 'de' ? '/' : `/${l}/`}`;
-          out = out.replace('<!-- HREFLANG_PLACEHOLDER -->', [`<link rel="canonical" href="${u('de')}" />`, ...LANGS.map((l) => link(l, u(l))), link('x-default', u('de'))].join('\n  '));
-        } else out = out.replace('<!-- HREFLANG_PLACEHOLDER -->', '<!-- hreflang/canonical: SITE_URL setzen (siehe README) -->');
-        html = out;
-        return out;
+        // preconnect zum Kachel-Anbieter: die Karte (lazy Chunk) lädt Stil/Kacheln dort; Verbindung steht dann schon
+        const out = src.replace('<head>', `<head>\n  <meta http-equiv="Content-Security-Policy" content="${csp()}" />\n  <link rel="preconnect" href="${TILE_PROVIDER.origin}" crossorigin />`);
+        template = out;
+        // canonical/hreflang/JSON-LD je Seite setzt scripts/prerender.mjs (closeBundle); index.html wird dort überschrieben
+        return out.replace(PLACEHOLDER, '<!-- canonical/hreflang: SITE_URL setzen (siehe README) -->');
       },
     },
     generateBundle(_o, bundle) {
@@ -61,12 +62,15 @@ function govfind(): Plugin {
     closeBundle() {
       const dir = join(process.cwd(), outDir);
       mkdirSync(dir, { recursive: true });
-      writeFileSync(join(dir, '404.html'), html); // SPA-Fallback für GitHub Pages / statische Hoster
-      writeFileSync(join(dir, 'robots.txt'), `User-agent: *\nAllow: /\n${siteUrl ? `Sitemap: ${origin}/sitemap.xml\n` : '# Sitemap: SITE_URL setzen und neu bauen\n'}`);
-      if (siteUrl) {
-        const loc = (l: string, p: string): string => `${origin}${l === 'de' ? '' : '/' + l}/${p}`;
-        const urls = PAGES.flatMap((p) => LANGS.map((l) => `<url><loc>${loc(l, p)}</loc>${LANGS.map((a) => `<xhtml:link rel="alternate" hreflang="${a}" href="${loc(a, p)}"/>`).join('')}<xhtml:link rel="alternate" hreflang="x-default" href="${loc('de', p)}"/></url>`));
-        writeFileSync(join(dir, 'sitemap.xml'), `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">\n${urls.join('\n')}\n</urlset>\n`);
+      // SPA-Fallback für GitHub Pages / statische Hoster (unbekannte Pfade): wird mit Status 404 ausgeliefert, nie indexieren
+      writeFileSync(join(dir, '404.html'), template.replace(PLACEHOLDER, '').replace('<meta name="robots" content="index,follow" />', '<meta name="robots" content="noindex" />'));
+      try {
+        prerender({ dir, publicDir: join(here, 'public'), template, origin, base, slash: trailingSlash, log: (m: string) => console.log(m) });
+      } catch (e) {
+        // Fallback: Startseite ohne Vorab-Rendering, robots.txt ohne Sitemap. Der Fehler wird laut gemeldet, der Build bleibt nutzbar.
+        console.error('\nSEO-Vorab-Rendering FEHLGESCHLAGEN (Seiten /stadt, /kategorie, /einrichtung, Sitemap fehlen):', e);
+        writeFileSync(join(dir, 'index.html'), template.replace(PLACEHOLDER, ''));
+        writeFileSync(join(dir, 'robots.txt'), 'User-agent: *\nAllow: /\n');
       }
     },
   };
@@ -74,6 +78,7 @@ function govfind(): Plugin {
 
 export default defineConfig({
   base,
+  define: { __SITE_ORIGIN__: JSON.stringify(siteOrigin), __TRAILING_SLASH__: JSON.stringify(trailingSlash) },
   plugins: [govfind()],
   build: { target: 'es2022', sourcemap: false, chunkSizeWarningLimit: 1200 },
   server: { host: true },

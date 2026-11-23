@@ -13,6 +13,7 @@
   --radius-l: 18px; --radius-m: 12px; --radius-s: 8px;
   --nav-h: 72px; --tap: 44px; --peek-h: 132px; --top-reserve: calc(118px + env(safe-area-inset-top));
   --attr-bottom: 0px;
+  --panel-h: calc(100dvh - var(--nav-h) - env(safe-area-inset-bottom) - var(--top-reserve));
   --ease: cubic-bezier(0.32, 0.72, 0, 1);
   color-scheme: dark;
   font-family: 'Outfit', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
@@ -75,7 +76,7 @@ noscript p { padding: 24px; }
 .icon-btn { min-width: var(--tap); min-height: var(--tap); display: inline-grid; place-items: center; border-radius: 50%; background: transparent; border: 0; color: var(--text); text-decoration: none; transition: transform 0.12s ease-out; flex: none; }
 .icon-btn:active { transform: scale(0.92); }
 .link-btn { background: none; border: 0; color: var(--accent); font-weight: 600; min-height: var(--tap); padding: 0 8px; text-decoration: underline; text-underline-offset: 3px; display: inline-flex; align-items: center; gap: 4px; }
-.link { color: var(--accent); font-weight: 600; display: inline-flex; align-items: center; gap: 4px; min-height: 32px; }
+.link { color: var(--accent); font-weight: 600; display: inline-flex; align-items: center; gap: 4px; min-height: var(--tap); }
 @media (hover: hover) and (pointer: fine) {
   .btn:hover { background: color-mix(in srgb, var(--bg3) 80%, var(--text) 20%); }
   .btn-primary:hover { background: color-mix(in srgb, var(--accent) 88%, #fff 12%); }
@@ -93,6 +94,8 @@ noscript p { padding: 24px; }
 .topbar { position: absolute; top: 0; left: 0; right: 0; z-index: 20; display: flex; align-items: center; gap: 8px; padding: calc(8px + env(safe-area-inset-top)) calc(12px + env(safe-area-inset-right)) 8px calc(12px + env(safe-area-inset-left)); pointer-events: none; }
 .topbar > * { pointer-events: auto; }
 .brand, .inline-search, .nearby-btn, .topnav { display: none; }
+.app[data-sheet='peek'] .nearby-cta { display: none; }
+.ambiguous { margin: 4px 0 8px; }
 .searchpill { flex: 1; min-width: 0; height: 48px; border-radius: 24px; background: var(--bg2); border: 1px solid var(--border); box-shadow: var(--shadow); display: flex; align-items: center; gap: 10px; padding: 0 16px; color: var(--text2); text-align: left; }
 .searchpill span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sos-btn { background: var(--danger-bg); color: var(--on-danger); box-shadow: var(--shadow); width: 48px; height: 48px; }
@@ -102,7 +105,7 @@ noscript p { padding: 24px; }
 .chip:active { transform: scale(0.96); }
 .chip.on { background: var(--accent); color: var(--on-accent); border-color: transparent; font-weight: 800; }
 .chip .dot { width: 10px; height: 10px; border-radius: 3px; flex: none; border: 1.5px solid #fff; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.25); }
-.chip-removable { box-shadow: none; min-height: 36px; font-weight: 600; }
+.chip-removable { box-shadow: none; min-height: var(--tap); font-weight: 600; }
 .active-chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 4px 0 8px; }
 .mapctl { position: absolute; right: calc(12px + env(safe-area-inset-right)); bottom: calc(var(--attr-bottom) + 52px); z-index: 18; display: flex; flex-direction: column; gap: 8px; transition: bottom 0.25s var(--ease); }
 .map-btn { width: 48px; height: 48px; border-radius: 14px; background: var(--bg2); border: 1px solid var(--border); box-shadow: var(--shadow); display: grid; place-items: center; color: var(--text); transition: transform 0.12s ease-out; }
@@ -116,7 +119,11 @@ noscript p { padding: 24px; }
 .app[data-sheet='peek'] .panel { --y: calc(100% - var(--peek-h)); }
 .app[data-sheet='half'] .panel { --y: calc(100% - 46dvh); }
 .app[data-sheet='full'] .panel { --y: 0px; }
-.sheet-handle { flex: none; height: 28px; width: 100%; background: none; border: 0; display: grid; place-items: center; touch-action: none; cursor: grab; }
+/* Mobil: der verschobene Teil der Schublade liegt unter der Tab-Leiste; Scroll-Ende muss über der Leiste landen (sonst sind die letzten Einträge unerreichbar) */
+.app[data-sheet='peek'] .panel-body { padding-bottom: calc(24px + var(--panel-h) - var(--peek-h)); }
+.app[data-sheet='half'] .panel-body { padding-bottom: calc(24px + var(--panel-h) - 46dvh); }
+.sheet-handle { position: relative; flex: none; height: 28px; width: 100%; background: none; border: 0; display: grid; place-items: center; touch-action: none; cursor: grab; }
+.sheet-handle::after { content: ''; position: absolute; inset: -8px 0; } /* Tippfläche 44 px, ohne das Layout zu verändern */
 .sheet-handle .bar { width: 40px; height: 5px; border-radius: 3px; background: var(--text3); }
 .panel-body { flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 0 16px calc(24px + env(safe-area-inset-bottom)); scroll-padding: 16px 0 96px; outline: none; -webkit-overflow-scrolling: touch; }
 .app[data-sheet='peek'] .panel-body { overflow: hidden; }
@@ -127,8 +134,8 @@ noscript p { padding: 24px; }
 .tab[aria-current='page'] span { text-decoration: underline; text-underline-offset: 4px; text-decoration-thickness: 2px; }
 
 /* ---------- Karte (MapLibre) ---------- */
-.maplibregl-ctrl-bottom-right { bottom: var(--attr-bottom); z-index: 5; transition: bottom 0.25s var(--ease); }
-.maplibregl-ctrl-bottom-left { bottom: var(--attr-bottom); }
+.app .maplibregl-ctrl-bottom-right { bottom: var(--attr-bottom); z-index: 5; transition: bottom 0.25s var(--ease); }
+.app .maplibregl-ctrl-bottom-left { bottom: var(--attr-bottom); } /* höhere Spezifität: das MapLibre-CSS wird nachgeladen und würde bottom:0 setzen */
 .maplibregl-ctrl-attrib { background: color-mix(in srgb, var(--bg2) 88%, transparent) !important; color: var(--text2) !important; font-size: 11px; max-width: 70vw; border-radius: 8px 0 0 0; padding: 2px 6px; }
 .maplibregl-ctrl-attrib a { color: var(--text2) !important; text-decoration: underline; }
 .maplibregl-ctrl-attrib-inner { line-height: 1.4; }
@@ -248,7 +255,8 @@ details > summary { cursor: pointer; }
 .inp { display: flex; align-items: center; gap: 8px; background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius-m); padding: 0 4px 0 12px; min-height: 48px; }
 .inp:focus-within { outline: 2px solid var(--focus); outline-offset: 2px; }
 .inp input { flex: 1; min-width: 0; background: none; border: 0; outline: none; min-height: 46px; font-size: 16px; }
-.inp .clear { min-width: 40px; min-height: 40px; }
+.inp .clear { min-width: var(--tap); min-height: var(--tap); }
+.inp input[type='search']::-webkit-search-cancel-button, .inp input[type='search']::-webkit-search-decoration { -webkit-appearance: none; appearance: none; display: none; } /* eigener Löschen-Button, kein doppeltes ✕ */
 .form-error { color: var(--err); font-weight: 600; margin: 0; }
 .suggest { list-style: none; margin: 0; padding: 0; }
 .suggest-wrap:not(.open) { display: none; }
@@ -267,13 +275,14 @@ details > summary { cursor: pointer; }
 /* ---------- Tablet/Desktop ---------- */
 @media (min-width: 768px) {
   .app { --panel-w: 360px; }
-  .topbar { height: 64px; padding: 0 16px; background: var(--bg2); border-bottom: 1px solid var(--border); pointer-events: auto; gap: 12px; }
+  .topbar { z-index: 35; height: 64px; padding: 0 16px; background: var(--bg2); border-bottom: 1px solid var(--border); pointer-events: auto; gap: 12px; }
   .brand { display: inline-flex; align-items: center; gap: 8px; font-weight: 800; font-size: 1.25rem; color: var(--text); text-decoration: none; min-height: var(--tap); }
   .searchpill { display: none; }
   .inline-search { display: block; flex: 1 1 0; min-width: 0; max-width: 640px; position: relative; }
   .nearby-btn { display: inline-flex; }
+  .chip-nearby { display: none; }
   .topnav { display: flex; gap: 2px; margin-left: auto; }
-  .topnav .btn span { display: none; } .topnav .btn:first-child span { display: inline; }
+  .topnav .btn span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; } .topnav .btn:first-child span { position: static; width: auto; height: auto; overflow: visible; clip: auto; } /* Beschriftung bleibt für Screenreader erhalten */
   .topnav .lang-code { display: inline; font-size: 0.8125rem; }
   .sos-btn { box-shadow: none; }
   .tabbar { display: none; }
@@ -284,19 +293,26 @@ details > summary { cursor: pointer; }
   .mapctl { bottom: 40px; }
   .search-area { left: calc(50% + var(--panel-w) / 2); top: 128px; }
   .banners { left: calc(var(--panel-w) + 12px); top: 128px; max-width: 480px; }
-  .panel-body { padding-bottom: 24px; }
+  .panel-body, .app[data-sheet] .panel-body { padding-bottom: 24px; }
   .app[data-sheet] .panel-body { overflow-y: auto; }
   #toast-root { bottom: 24px; left: calc(var(--panel-w) + 12px); justify-content: flex-start; }
   .search-form.sf-inline { flex-direction: row; align-items: center; gap: 8px; }
   .search-form.sf-inline .fld { flex: 1 1 0; min-width: 0; } .search-form.sf-inline .fld label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
   .search-form.sf-inline .hint { display: none; }
-  .search-form.sf-inline .inp { min-height: 44px; } .search-form.sf-inline .inp input { min-height: 42px; }
+  .search-form.sf-inline .inp { min-height: 46px; } .search-form.sf-inline .inp input { min-height: 44px; }
   .search-form.sf-inline .submit { flex: none; }
   .suggest-wrap.sf-inline { position: absolute; top: calc(100% + 4px); left: 0; right: 0; background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius-m); box-shadow: var(--shadow); max-height: 60dvh; overflow-y: auto; padding: 4px 12px; z-index: 50; }
   .filter-overlay, .search-overlay { inset: 0 auto 0 50%; width: min(560px, 100%); translate: -50% 0; box-shadow: var(--shadow); }
   .maplibregl-ctrl-bottom-right, .maplibregl-ctrl-bottom-left { bottom: 0; }
 }
-@media (min-width: 1200px) { .app { --panel-w: 420px; } .topnav .btn span { display: inline; } .topnav .lang-code { display: inline; } }
+@media (min-width: 1200px) { .app { --panel-w: 420px; } .topnav .btn span { position: static; width: auto; height: auto; overflow: visible; clip: auto; } .topnav .lang-code { display: inline; } }
+/* Tablet / schmaler Desktop: nur Symbole, damit die Suchfelder genug Platz behalten (vorher 24 px breit bei 768 px) */
+@media (min-width: 768px) and (max-width: 1099px) {
+  .brand-name, .nearby-btn span, .topnav .btn:first-child span, .search-form.sf-inline .submit span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .topbar { gap: 8px; padding: 0 12px; }
+  .search-form.sf-inline .submit { min-width: 44px; padding: 0 12px; }
+  .search-form.sf-inline { gap: 6px; }
+}
 
 /* ---------- Bewegung reduzieren ---------- */
 @media (prefers-reduced-motion: reduce) {
@@ -306,7 +322,6 @@ details > summary { cursor: pointer; }
 
 /* ---------- Politur: Glas (zurückhaltend), Eintritts-Animation ---------- */
 @supports (backdrop-filter: blur(1px)) {
-  .tabbar { background: color-mix(in srgb, var(--bg2) 82%, transparent); backdrop-filter: blur(18px) saturate(1.5); }
   .searchpill, .chip, .map-btn { background: color-mix(in srgb, var(--bg2) 86%, transparent); backdrop-filter: blur(14px) saturate(1.4); }
   .chip.on { background: var(--accent); }
 }

@@ -30,8 +30,11 @@ function registerSW(): void {
       w.addEventListener('statechange', () => { if (w.state === 'installed' && navigator.serviceWorker.controller) offer(w); });
     });
   }).catch(() => undefined);
+  // Neu laden nur nach einem Update (es gab schon einen aktiven Service Worker). Beim allerersten Besuch übernimmt der SW per clients.claim()
+  // die Seite: ein Reload würde hier Eingaben, Standortdialog und laufende Suche zurücksetzen.
+  const hadController = !!navigator.serviceWorker.controller;
   let reloaded = false;
-  navigator.serviceWorker.addEventListener('controllerchange', () => { if (reloaded) return; reloaded = true; location.reload(); });
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (reloaded || !hadController) return; reloaded = true; location.reload(); });
 }
 
 void boot();

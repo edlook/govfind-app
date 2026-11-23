@@ -37,7 +37,7 @@ export function createSearchForm(mode: 'overlay' | 'inline', submit: (was: strin
     const out: (Item | { title: string })[] = [];
     if (!isWas) {
       out.push({ label: t('search.where.my_location'), ic: 'locate', pick: () => { nearby = true; wo.value = t('search.where.my_location'); closeList(); } });
-      if (index && q) for (const s of suggestWo(index, q)) out.push({ label: s.label, ic: 'pin', pick: () => { nearby = false; wo.value = s.value; closeList(); } });
+      if (index && q) for (const s of suggestWo(index, q)) out.push({ label: s.label, sub: s.sub || undefined, ic: 'pin', pick: () => { nearby = false; wo.value = s.value; closeList(); } });
     } else if (q.length >= 2) {
       for (const s of suggestWas(q)) out.push({ label: s.label, sub: s.kind === 'type' ? t('search.suggest.types') : t('search.suggest.names'), ic: s.kind === 'type' ? 'building' : 'pin', pick: () => { was.value = s.value; closeList(); if (!wo.value) wo.focus(); } });
     } else {
@@ -100,6 +100,8 @@ export function createSearchForm(mode: 'overlay' | 'inline', submit: (was: strin
     err, wrap,
     h('button', { class: 'btn btn-primary submit', type: 'submit' }, icon('search', { size: 20 }), h('span', null, t('search.submit'))));
   form.addEventListener('submit', (e) => { e.preventDefault(); run(); });
+  // Inline-Vorschläge schließen, wenn der Fokus per Tab das Formular verlässt (sonst bleibt die Liste über der Karte stehen)
+  form.addEventListener('focusout', (e) => { if (mode === 'inline' && !form.contains((e as FocusEvent).relatedTarget as Node | null)) closeList(); });
   document.addEventListener('pointerdown', (e) => { if (mode === 'inline' && !form.contains(e.target as Node)) closeList(); });
   void SUBS; void norm;
   return {

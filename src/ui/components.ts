@@ -3,7 +3,7 @@ import { slugify } from '../../shared/taxonomy.js';
 import { addressLine, placeCell } from '../data';
 import { hoursReady, loadHours, statusOf } from '../hours';
 import { fmtNumber, getLang, t } from '../i18n';
-import { colorOfSub, glyphColorOn, glyphOfSub } from '../map';
+import { colorOfSub, glyphColorOn, glyphOfSub } from '../marker-style';
 import { href } from '../router';
 import { getSettings } from '../storage';
 import type { Place } from '../types';
