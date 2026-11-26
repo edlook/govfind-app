@@ -20,4 +20,4 @@ export const GERMANY_CENTER: [number, number] = [10.45, 51.16];
 export const OSM_EDIT = 'https://www.openstreetmap.org';
 
 /** Kontakt-E-Mail des Betreibers (leer = "per E-Mail melden" und Kontaktzeilen werden nicht als Link gezeigt). Vom Eigentümer zu setzen. */
-export const CONTACT_EMAIL = '';
+export const CONTACT_EMAIL = 'casper19851106@yahoo.com';
