@@ -23,7 +23,9 @@ function registerSW(): void {
   if (!('serviceWorker' in navigator) || import.meta.env.DEV) return;
   const base = import.meta.env.BASE_URL;
   navigator.serviceWorker.register(`${base}sw.js`, { scope: base }).then((reg) => {
-    const offer = (w: ServiceWorker): void => notifyUpdate(() => { w.postMessage('skip-waiting'); });
+    // Vorabversion: Updates sofort einspielen (kein Banner), damit Tester nie eine veraltete Version sehen; notifyUpdate bleibt für später
+    void notifyUpdate;
+    const offer = (w: ServiceWorker): void => { w.postMessage('skip-waiting'); };
     if (reg.waiting && navigator.serviceWorker.controller) offer(reg.waiting);
     reg.addEventListener('updatefound', () => {
       const w = reg.installing; if (!w) return;
