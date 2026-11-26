@@ -12,8 +12,9 @@
 #   deploy   GitHub Pages.
 name: build-data
 on:
-  schedule:
-    - cron: '17 3 * * 1' # montags 03:17 UTC (Geofabrik aktualisiert täglich; seltener reicht, z. B. monatlich: '17 3 1 * *')
+  # Zeitplan bewusst deaktiviert (ca. 4,5 GB Download je Lauf; Deployment läuft über Cloudflare Pages). Bei Bedarf:
+  # schedule:
+  #   - cron: '17 3 1 * *'
   workflow_dispatch:
 permissions:
   contents: read
