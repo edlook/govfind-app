@@ -214,6 +214,8 @@ export async function renderRoute(host: HTMLElement, id: string, hint: string | 
   });
   useCacheOrIdle();
   if (armed && S.userLoc && !result) void load(); else paint();
+  // „Route“ wurde getippt, Standort noch unbekannt: Standort jetzt anfragen (die Nutzenden haben aktiv „Route“ gewählt); danach rechnet die Ansicht automatisch
+  if (armed && !S.userLoc && S.geo !== 'loading') void A.locate({ pan: false });
   replace(host, h('div', { class: 'place' }, head(), body));
   draw();
 }

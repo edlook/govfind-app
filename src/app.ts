@@ -187,6 +187,38 @@ function initSheetDrag(): void {
   });
   // „half“: Inhalt ist scrollbar; sobald gescrollt wird, Schublade auf „full“ fahren
   R.body.addEventListener('scroll', () => { if (!isDesktop() && S.sheet === 'half' && R.body.scrollTop > 6) A.setSheet('full'); }, { passive: true });
+  // „half“: Wischen nach unten auf dem Inhalt (ganz oben) zieht die Schublade. iOS kennt touch-action „pan-up“ nicht, daher per Touch-Ereignissen
+  // (touchmove nicht passiv: preventDefault verhindert das Scrollen, solange die Geste die Schublade zieht).
+  {
+    let tr: { x0: number; y0: number; startT: number; lastY: number; lastT: number; vy: number; drag: boolean } | null = null;
+    R.body.addEventListener('touchstart', (e) => {
+      if (isDesktop() || S.sheet !== 'half' || e.touches.length !== 1) { tr = null; return; }
+      const tc = e.touches[0]!;
+      tr = { x0: tc.clientX, y0: tc.clientY, startT: ty(), lastY: tc.clientY, lastT: e.timeStamp, vy: 0, drag: false };
+    }, { passive: true });
+    R.body.addEventListener('touchmove', (e) => {
+      if (!tr || e.touches.length !== 1) return;
+      const tc = e.touches[0]!; const dy = tc.clientY - tr.y0; const dx = tc.clientX - tr.x0;
+      if (!tr.drag) {
+        if (Math.abs(dy) < 8 || Math.abs(dy) < Math.abs(dx)) return;
+        if (dy > 0 && R.body.scrollTop <= 0) { tr.drag = true; panel.classList.add('dragging'); panel.style.transition = 'none'; }
+        else { tr = null; return; } // Scrollen des Inhalts
+      }
+      const dt = e.timeStamp - tr.lastT;
+      if (dt > 0) tr.vy = 0.8 * tr.vy + 0.2 * ((tc.clientY - tr.lastY) / dt);
+      tr.lastY = tc.clientY; tr.lastT = e.timeStamp;
+      panel.style.transform = `translateY(${Math.max(0, Math.min(snaps().peek, tr.startT + dy))}px)`;
+      if (e.cancelable) e.preventDefault();
+    }, { passive: false });
+    const endTouch = (cancelled: boolean): void => {
+      const cur = tr; tr = null;
+      if (!cur || !cur.drag) return;
+      d = { id: -1, x0: cur.x0, y0: cur.y0, startT: cur.startT, maxT: snaps().peek, moved: true, handle: false, lastY: cur.lastY, lastT: cur.lastT, vy: cur.vy };
+      finish(cancelled);
+    };
+    R.body.addEventListener('touchend', () => endTouch(false), { passive: true });
+    R.body.addEventListener('touchcancel', () => endTouch(true), { passive: true });
+  }
   panel.addEventListener('pointerup', () => finish(false));
   panel.addEventListener('pointercancel', () => finish(true));
   panel.addEventListener('lostpointercapture', () => { if (d?.moved) finish(false); });

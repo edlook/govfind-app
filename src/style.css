@@ -272,7 +272,7 @@ details > summary { cursor: pointer; }
   /* In „peek“ und „half“ ist die ganze Schublade die Ziehfläche (Inhalt scrollt erst in „full“); in „full“ nur der Griff */
   .app[data-sheet='peek'] .panel { touch-action: none; }
   .app[data-sheet='half'] .panel { touch-action: none; }
-  .app[data-sheet='half'] .panel-body { touch-action: pan-up; } /* „half“: Inhalt scrollt; erstes Scrollen fährt die Schublade auf „full“ */
+  .app[data-sheet='half'] .panel-body { touch-action: pan-y; } /* „half“: Inhalt scrollt; erstes Scrollen fährt die Schublade auf „full“ */
   .app[data-sheet='full'] .sheet-handle { touch-action: none; }
   .search-form.sf-overlay .submit { position: sticky; bottom: 0; }
   .field { grid-template-columns: 104px 1fr; }
