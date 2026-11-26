@@ -114,7 +114,7 @@ export async function renderRoute(host: HTMLElement, id: string, hint: string | 
     return h('div', null,
       h('p', { class: 'route-sum' }, h('strong', null, fmtDuration(r.durationS)), ' · ', distanceText(r.distanceM / 1000)),
       h('p', { class: 'meta' }, t('route.result_service', { service: r.provider })),
-      steps.length ? h('details', { class: 'steps' }, h('summary', null, t('route.steps.title', { count: steps.length })),
+      steps.length ? h('details', { class: 'steps', open: true }, h('summary', null, t('route.steps.title', { count: steps.length })),
         h('ol', { class: 'step-list' }, steps.map((s) => {
           const k = stepKey(s);
           const text = t(k.key, k.params) + (k.onto && s.name ? ' ' + t('route.step.onto', { street: s.name }) : '');
