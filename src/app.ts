@@ -165,7 +165,7 @@ function initSheetDrag(): void {
     const target = e.target as Element;
     const onHandle = R.handle.contains(target);
     if (d) finish(true); else if (panel.style.transform) resetPanelInline();
-    if (!onHandle && (S.sheet === 'full' || target.closest('textarea,input,select'))) return; // in „full“ scrollt der Inhalt
+    if (!onHandle && (S.sheet === 'full' || (S.sheet === 'half' && R.body.contains(target)) || target.closest('textarea,input,select'))) return; // in „full“ scrollt der Inhalt
     d = { id: e.pointerId, x0: e.clientX, y0: e.clientY, startT: ty(), maxT: snaps().peek, moved: false, handle: onHandle, lastY: e.clientY, lastT: e.timeStamp, vy: 0 };
     arm();
   });
@@ -185,6 +185,8 @@ function initSheetDrag(): void {
     if (e.cancelable) e.preventDefault();
     arm();
   });
+  // „half“: Inhalt ist scrollbar; sobald gescrollt wird, Schublade auf „full“ fahren
+  R.body.addEventListener('scroll', () => { if (!isDesktop() && S.sheet === 'half' && R.body.scrollTop > 6) A.setSheet('full'); }, { passive: true });
   panel.addEventListener('pointerup', () => finish(false));
   panel.addEventListener('pointercancel', () => finish(true));
   panel.addEventListener('lostpointercapture', () => { if (d?.moved) finish(false); });
