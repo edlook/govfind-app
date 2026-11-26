@@ -51,8 +51,21 @@ export async function renderRoute(host: HTMLElement, id: string, hint: string | 
   let started = armed;
   let selected = 0;
   let seq = 0;
+  let showSteps = false;
+  const times: Partial<Record<TravelMode, number>> = {};
   const here = (): boolean => getRoute().name === 'route' && getRoute().id === id;
   const body = h('div', { class: 'route' });
+  // Kopfkarte über der Karte (Von / Nach) wie in gängigen Karten-Apps; wird beim Verlassen der Route-Ansicht in app.ts entfernt
+  document.querySelector('.route-top')?.remove();
+  const appEl = document.querySelector<HTMLElement>('.app');
+  const topCard = h('div', { class: 'route-top' },
+    h('button', { class: 'icon-btn', type: 'button', 'aria-label': t('common.action.back'), onclick: back }, icon('back', { size: 22 })),
+    h('div', { class: 'rt-lines' },
+      h('div', { class: 'rt-row from' }, h('span', { class: 'rt-dot' }), h('span', { class: 'rt-from' }, '–')),
+      h('div', { class: 'rt-row' }, icon('pin', { size: 18 }), h('span', { lang: 'de' }, place.nm))));
+  if (appEl) { appEl.dataset.route = '1'; appEl.append(topCard); }
+  const paintTop = (): void => { const f = topCard.querySelector('.rt-from'); if (f) f.textContent = S.userLoc ? t('route.from_my_location') : '–'; };
+  paintTop();
 
   // ---- Karte ----
   const draw = (): void => {
@@ -84,7 +97,9 @@ export async function renderRoute(host: HTMLElement, id: string, hint: string | 
     try {
       const r = await fetchRoute(mode, user, dest, { lang: getLang(), ...(cursor ? { cursor } : {}) });
       if (my !== seq || !here()) return;
-      result = r; selected = 0;
+      result = r; selected = 0; showSteps = false;
+      times[mode] = r.kind === 'road' ? r.durationS : r.itineraries[0]?.durationS ?? NaN;
+      if (!cursor) void prefetchOthers(user);
     } catch (e) {
       if (my !== seq || !here()) return;
       error = e instanceof RouteError ? e : new RouteError('network');
@@ -92,10 +107,22 @@ export async function renderRoute(host: HTMLElement, id: string, hint: string | 
     }
     loading = false; paint(); draw();
   };
+  // Dauer der übrigen Verkehrsmittel nacheinander im Hintergrund holen (Anzeige in den Reitern); Fehler bleiben still
+  const prefetchOthers = async (user: LatLng): Promise<void> => {
+    for (const m of MODES) {
+      if (m === mode || !routeEnabled(m) || times[m] !== undefined) continue;
+      try {
+        const r = await fetchRoute(m, user, dest, { lang: getLang() });
+        times[m] = r.kind === 'road' ? r.durationS : r.itineraries[0]?.durationS ?? NaN;
+        if (here()) paint();
+      } catch { /* Reiter zeigt dann nur den Namen */ }
+      if (!here()) return;
+    }
+  };
   const useCacheOrIdle = (): void => {
     const user = S.userLoc;
     const hit = user ? cachedRoute(mode, user, dest) : null;
-    if (hit) { result = hit; started = true; selected = 0; }
+    if (hit) { result = hit; started = true; selected = 0; times[mode] = hit.kind === 'road' ? hit.durationS : hit.itineraries[0]?.durationS ?? NaN; }
   };
 
   // ---- Darstellung ----
@@ -111,15 +138,19 @@ export async function renderRoute(host: HTMLElement, id: string, hint: string | 
 
   const roadView = (r: RoadRoute): HTMLElement => {
     const steps = r.steps.filter((s, i) => s.distanceM > 0 || s.type === 'arrive' || i === 0);
+    const arrive = fmtTime(new Date(Date.now() + r.durationS * 1000).toISOString());
     return h('div', null,
-      h('p', { class: 'route-sum' }, h('strong', null, fmtDuration(r.durationS)), ' · ', distanceText(r.distanceM / 1000)),
-      h('p', { class: 'meta' }, t('route.result_service', { service: r.provider })),
-      steps.length ? h('details', { class: 'steps', open: true }, h('summary', null, t('route.steps.title', { count: steps.length })),
-        h('ol', { class: 'step-list' }, steps.map((s) => {
-          const k = stepKey(s);
-          const text = t(k.key, k.params) + (k.onto && s.name ? ' ' + t('route.step.onto', { street: s.name }) : '');
-          return h('li', null, h('span', { class: 'step-text' }, text), s.distanceM >= 10 ? h('span', { class: 'meta step-dist' }, distanceText(s.distanceM / 1000)) : null);
-        }))) : null);
+      h('p', { class: 'route-sum' }, h('strong', null, fmtDuration(r.durationS))),
+      h('p', { class: 'route-sub2' }, t('route.arrival', { time: arrive }), ' · ', distanceText(r.distanceM / 1000)),
+      steps.length ? h('button', { class: 'btn btn-primary btn-block', type: 'button', 'aria-expanded': String(showSteps),
+        onclick: () => { showSteps = !showSteps; if (showSteps) A.setSheet('full'); paint(); } },
+        icon('navigate'), h('span', null, showSteps ? t('route.steps.hide') : t('route.start'))) : null,
+      showSteps ? h('ol', { class: 'step-list' }, steps.map((s) => {
+        const k = stepKey(s);
+        const text = t(k.key, k.params) + (k.onto && s.name ? ' ' + t('route.step.onto', { street: s.name }) : '');
+        return h('li', null, h('span', { class: 'step-text' }, text), s.distanceM >= 10 ? h('span', { class: 'meta step-dist' }, distanceText(s.distanceM / 1000)) : null);
+      })) : null,
+      null);
   };
 
   const lineChip = (l: Itinerary['legs'][number]): HTMLElement => {
@@ -163,10 +194,10 @@ export async function renderRoute(host: HTMLElement, id: string, hint: string | 
   };
 
   function paint(): void {
-    const user = S.userLoc;
+    const user = S.userLoc; paintTop();
     const svc = ROUTE_PROVIDERS[mode === 'transit' ? 'transit' : mode];
     const seg = h('div', { class: 'segmented', role: 'radiogroup', 'aria-label': t('route.mode.label') },
-      MODES.filter(routeEnabled).map((m) => h('button', { class: 'seg', type: 'button', role: 'radio', 'aria-checked': String(m === mode),
+      MODES.filter(routeEnabled).map((m) => h('button', { class: 'seg', type: 'button', role: 'radio', 'aria-checked': String(m === mode), 'aria-label': t(`route.mode.${m}`),
         onclick: () => {
           if (m === mode) return;
           mode = m; try { localStorage.setItem('gf.routemode', m); } catch { /* ignore */ }
@@ -174,7 +205,7 @@ export async function renderRoute(host: HTMLElement, id: string, hint: string | 
           // Wechsel des Verkehrsmittels = Aktion der Nutzenden: sofort berechnen
           if (S.userLoc && !result) void load(); else { paint(); draw(); }
         } },
-        icon(m === 'walk' ? 'walk' : m === 'car' ? 'car' : 'bus', { size: 20 }), h('span', null, t(`route.mode.${m}`)))));
+        icon(m === 'walk' ? 'walk' : m === 'car' ? 'car' : 'bus', { size: 20 }), h('span', null, times[m] !== undefined && Number.isFinite(times[m]) ? fmtDuration(times[m]!) : t(`route.mode.${m}`)))));
     let main: Node | null;
     if (!routeEnabled(mode)) main = h('div', null, banner('info', t('route.err.disabled')), beeline(), external(true));
     else if (!user && S.geo === 'loading') main = h('div', null, h('p', { role: 'status', class: 'meta' }, t('route.locating')), skeletonRows(2));
@@ -196,9 +227,6 @@ export async function renderRoute(host: HTMLElement, id: string, hint: string | 
 
     const road = mode !== 'transit' && result?.kind === 'road';
     replace(body,
-      h('div', { class: 'ft' },
-        h('div', null, h('span', { class: 'meta' }, t('route.from')), h('p', { class: 'strong' }, user ? t('route.from_my_location') : '–')),
-        h('div', null, h('span', { class: 'meta' }, t('route.to')), h('p', { class: 'strong', lang: 'de' }, place.nm))),
       seg, main,
       road ? h('p', { class: 'meta' }, ...withNode(t('route.attribution', { osm: '{osm}', service: svc.name }), 'osm', ext('https://www.openstreetmap.org/copyright', t('route.attribution.osm'))), ' ', ext('https://www.openstreetmap.org/fixthemap', t('route.fixthemap'))) : null,
       !S.online ? banner('info', t('route.offline')) : null,
@@ -212,10 +240,11 @@ export async function renderRoute(host: HTMLElement, id: string, hint: string | 
     off(); useCacheOrIdle();
     if (armed && !result && !loading) void load(); else { paint(); draw(); }
   });
+  A.setSheet('half');
   useCacheOrIdle();
   if (armed && S.userLoc && !result) void load(); else paint();
   // „Route“ wurde getippt, Standort noch unbekannt: Standort jetzt anfragen (die Nutzenden haben aktiv „Route“ gewählt); danach rechnet die Ansicht automatisch
   if (armed && !S.userLoc && S.geo !== 'loading') void A.locate({ pan: false });
-  replace(host, h('div', { class: 'place' }, head(), body));
+  replace(host, h('div', { class: 'place' }, body));
   draw();
 }

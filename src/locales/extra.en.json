@@ -201,5 +201,8 @@
   "cuisine.dumplings": "Dumplings",
   "cuisine.hot_dog": "Hot dog",
   "cuisine.poke": "Poke",
-  "cuisine.kumpir": "Kumpir"
+  "cuisine.kumpir": "Kumpir",
+  "route.arrival": "Arrive at {time}",
+  "route.start": "Directions",
+  "route.steps.hide": "Hide directions"
 }

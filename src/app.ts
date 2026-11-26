@@ -121,6 +121,7 @@ function updateAttrOffset(): void {
 function sheetPad(): number {
   if (isDesktop()) return 0;
   const vh = window.innerHeight;
+  if (R.app.dataset.route && S.sheet !== 'full') return Math.round(vh * 0.58); // Route-Ansicht: Schublade + Tab-Leiste verdecken ≈ 55 %
   const visible = S.sheet === 'peek' ? 132 : vh * (S.sheet === 'half' ? 0.46 : 0.45);
   return Math.round(Math.min(visible + 12, vh * 0.45));
 }
@@ -192,7 +193,7 @@ function initSheetDrag(): void {
   {
     let tr: { x0: number; y0: number; startT: number; lastY: number; lastT: number; vy: number; drag: boolean } | null = null;
     R.body.addEventListener('touchstart', (e) => {
-      if (isDesktop() || S.sheet !== 'half' || e.touches.length !== 1) { tr = null; return; }
+      if (isDesktop() || S.sheet === 'peek' || e.touches.length !== 1) { tr = null; return; }
       const tc = e.touches[0]!;
       tr = { x0: tc.clientX, y0: tc.clientY, startT: ty(), lastY: tc.clientY, lastT: e.timeStamp, vy: 0, drag: false };
     }, { passive: true });
@@ -582,7 +583,7 @@ function handleRoute(r: Route): void {
   syncH1(r);
   // JSON-LD aus dem Vorab-Rendering gehört nur zur zuerst geladenen Seite: bei App-Navigation entfernen (sonst falsche Daten)
   if (!first) document.head.querySelectorAll('script[data-prerender-ld]').forEach((n) => n.remove());
-  if (r.name !== 'route') S.map?.setRoute(null, null);
+  if (r.name !== 'route') { S.map?.setRoute(null, null); document.querySelector('.route-top')?.remove(); R.app.removeAttribute('data-route'); }
   if (r.name !== 'place' && r.name !== 'route' && r.name !== 'report') S.map?.setSelected(null);
   if (r.name === 'map' || r.name === 'search') {
     S.filters = filtersFromQuery(r.q); paintChips();
