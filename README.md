@@ -143,7 +143,7 @@ Das QA-Skript ruft die echten Routing-Dienste auf (wenige Anfragen je Lauf); Feh
 GitHub Pages (Actions-Entwurf mit Matrix über 16 Länder + Merge: `.github/workflows/build-data.yml`, nicht in Actions getestet) oder Cloudflare Pages (`npm run build`, Ausgabe `dist`). `dist/404.html` ist SPA-Fallback. Nichts wurde veröffentlicht.
 
 ## Offen / [prüfen]
-- **Routen in der App:** Transitous setzt ein öffentliches Open-Source-Projekt ohne kommerzielle Nutzung voraus (Repo ist privat), FOSSGIS verlangt eine erreichbare Betreiber-E-Mail (`CONTACT_EMAIL`), beide Dienste ohne Garantie. Datenschutz s05/s07 nennen die Dienste; Betreiber/Anschrift/Serverstandort von Transitous **[prüfen]**; juristische Prüfung steht aus. Auf einem echten iPhone nicht geprüft.
+- **Routen in der App:** Transitous setzt ein öffentliches Open-Source-Projekt ohne kommerzielle Nutzung voraus (Repo ist seit 2026-11-26 öffentlich, Code unter MIT, siehe `LICENSE`; Daten bleiben ODbL), FOSSGIS verlangt eine erreichbare Betreiber-E-Mail (`CONTACT_EMAIL`), beide Dienste ohne Garantie. Datenschutz s05/s07 nennen die Dienste; Betreiber/Anschrift/Serverstandort von Transitous **[prüfen]**; juristische Prüfung steht aus. Auf einem echten iPhone nicht geprüft.
 - **Impressum ist Platzhalter, Datenschutz ist Entwurf** (Platzhalter in eckigen Klammern sind sichtbar markiert). Nicht produktiv ohne juristische Prüfung und Eigentümerdaten. Kontakt-E-Mail: `src/config.ts` `CONTACT_EMAIL` (leer = kein Mail-Link).
 - Hoster (Logs, Datenschutz s03), Domain, Marke/Name. PVOG und Destatis nicht eingebunden (Lizenz/Zugang offen).
 - SEO: siehe Abschnitt „SEO und Vorab-Rendering“. Offen: `/stadt/<slug>/<kategorie>` nur für Behörden-Unterkategorien; Impressum/Datenschutz sind `noindex`, bis sie final sind.
