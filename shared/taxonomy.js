@@ -3,7 +3,8 @@
 // Regeln mit by:'name' sind Name-Heuristiken (Marker classified_by_name, im UI nicht angezeigt).
 // Alles, was nicht auf dem OSM Wiki bestätigt ist, bleibt [prüfen] (siehe README).
 
-/** 8 Gruppen (Reihenfolge = Reihenfolge im UI). shape: pin | square
+/** 9 Gruppen (Reihenfolge = Reihenfolge im UI). shape: pin | square | hex
+ *  Gruppe "gastronomie" (OSM, nicht staatlich): eigene Datei-Familie (c-g/, index-g.json), nicht Teil von "Alle" der Einrichtungen.
  * @type {{slug: string, color: string, shape: string, glyph: string}[]} */
 export const GROUPS = [
   { slug: 'behoerden', color: '#4f7cff', shape: 'pin', glyph: 'building' },
@@ -14,7 +15,10 @@ export const GROUPS = [
   { slug: 'post_verkehr', color: '#14b8a6', shape: 'pin', glyph: 'mail' },
   { slug: 'justiz', color: '#f97316', shape: 'pin', glyph: 'scales' },
   { slug: 'fachaemter', color: '#ec4899', shape: 'pin', glyph: 'folder' },
+  { slug: 'gastronomie', color: '#8b5a2b', shape: 'hex', glyph: 'utensils' },
 ];
+/** Gruppe, die getrennt gebaut/geladen wird (nicht staatlich) */
+export const GASTRO_GROUP = 'gastronomie';
 
 /** Unterkategorien: [slug, group, glyph?] (Reihenfolge = Reihenfolge im Filter)
  * @type {{slug: string, group: string, glyph: string | null}[]} */
@@ -36,11 +40,17 @@ export const SUBS = [
   ['buergerbuero', 'fachaemter'], ['umweltamt', 'fachaemter'], ['veterinaeramt', 'fachaemter'],
   ['bauamt', 'fachaemter'], ['strassenverkehrsamt', 'fachaemter'], ['rentenversicherung', 'fachaemter'],
   ['krankenkasse', 'fachaemter'],
+  ['restaurant', 'gastronomie'], ['cafe', 'gastronomie'], ['imbiss', 'gastronomie'], ['bar', 'gastronomie'],
+  ['kneipe', 'gastronomie'], ['biergarten', 'gastronomie'], ['eisdiele', 'gastronomie'], ['food_court', 'gastronomie'],
 ].map(([slug, group, glyph]) => ({ slug, group, glyph: glyph || null }));
 
 export const SUB_BY_SLUG = Object.fromEntries(SUBS.map((s) => [s.slug, s]));
 export const GROUP_BY_SLUG = Object.fromEntries(GROUPS.map((g) => [g.slug, g]));
 export const GROUP_OF = Object.fromEntries(SUBS.map((s) => [s.slug, s.group]));
+/** Unterkategorie gehört zur Gastronomie-Gruppe? */
+export const isGastroSub = (sub) => GROUP_OF[sub] === GASTRO_GROUP;
+/** OSM amenity -> Gastro-Unterkategorie */
+export const GASTRO_AMENITY = { restaurant: 'restaurant', cafe: 'cafe', fast_food: 'imbiss', bar: 'bar', pub: 'kneipe', biergarten: 'biergarten', ice_cream: 'eisdiele', food_court: 'food_court' };
 
 /** Kategorie-Farbe/Glyph pro Unterkategorie (Polizei/Feuerwehr/Post/Verkehr weichen von der Gruppe ab, brief.md) */
 export const SUB_COLOR = {
@@ -225,6 +235,9 @@ export function classify(t) {
     if (/staatsanwaltschaft/i.test(name)) return mk('staatsanwaltschaft', 'name');
     return mk('gericht_sonstige');
   }
+
+  // Gastronomie (zuletzt: staatliche Tags haben Vorrang)
+  if (am && Object.hasOwn(GASTRO_AMENITY, am)) return mk(GASTRO_AMENITY[am]);
   return null;
 }
 
@@ -240,6 +253,7 @@ export const OVERPASS_FILTERS = [
   'nwr["emergency"="ambulance_station"]["name"]',
   'nwr["name"~"(^|[^A-Za-zÄÖÜäöüß])(THW|Technisches Hilfswerk)([^A-Za-zÄÖÜäöüß]|$)"]["emergency"]',
   'nwr["name"~"Deutsche Rentenversicherung"]["office"]',
+  'nwr["amenity"~"^(restaurant|cafe|fast_food|bar|pub|biergarten|ice_cream|food_court)$"]["name"]',
 ];
 
 /** Schneller Vorfilter für große Extrakte: nur Elemente mit diesen Schlüsseln prüfen. */

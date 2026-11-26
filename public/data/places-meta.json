@@ -1,7 +1,7 @@
 {
  "v": 1,
- "built_at": "2026-11-20T13:35:32.669Z",
- "stand": "2026-11-19T21:22:20.000Z",
+ "built_at": "2026-11-26T12:53:40.221Z",
+ "stand": "2026-11-24T21:21:23.000Z",
  "source": "OpenStreetMap",
  "attribution": "© OpenStreetMap contributors",
  "license": "ODbL-1.0",
@@ -12,101 +12,103 @@
   {
    "id": "berlin",
    "name": "Berlin",
-   "extract_date": "2026-11-19T21:22:20.000Z",
-   "count": 7882
+   "extract_date": "2026-11-24T21:21:23.000Z",
+   "count": 7885
   },
   {
    "id": "hamburg",
    "name": "Hamburg",
-   "extract_date": "2026-11-19T21:22:20.000Z",
-   "count": 4098
+   "extract_date": "2026-11-24T21:21:23.000Z",
+   "count": 4101
   },
   {
    "id": "bremen",
    "name": "Bremen",
-   "extract_date": "2026-11-19T21:22:20.000Z",
-   "count": 1606
+   "extract_date": "2026-11-24T21:21:23.000Z",
+   "count": 1605
   },
   {
    "id": "baden-wuerttemberg",
    "name": "Baden-Württemberg",
-   "extract_date": "2026-11-19T21:22:20.000Z",
-   "count": 32033
+   "extract_date": "2026-11-24T21:21:23.000Z",
+   "count": 32050
   },
   {
    "id": "bayern",
    "name": "Bayern",
-   "extract_date": "2026-11-19T21:22:20.000Z",
-   "count": 37857
+   "extract_date": "2026-11-24T21:21:23.000Z",
+   "count": 37873
   },
   {
    "id": "brandenburg",
    "name": "Brandenburg",
-   "extract_date": "2026-11-19T21:22:20.000Z",
-   "count": 7435
+   "extract_date": "2026-11-24T21:21:23.000Z",
+   "count": 7440
   },
   {
    "id": "hessen",
    "name": "Hessen",
-   "extract_date": "2026-11-19T21:22:20.000Z",
-   "count": 16449
+   "extract_date": "2026-11-24T21:21:23.000Z",
+   "count": 16459
   },
   {
    "id": "mecklenburg-vorpommern",
    "name": "Mecklenburg-Vorpommern",
-   "extract_date": "2026-11-19T21:22:20.000Z",
-   "count": 4945
+   "extract_date": "2026-11-24T21:21:23.000Z",
+   "count": 4943
   },
   {
    "id": "niedersachsen",
    "name": "Niedersachsen",
-   "extract_date": "2026-11-19T21:22:20.000Z",
-   "count": 22756
+   "extract_date": "2026-11-24T21:21:23.000Z",
+   "count": 22771
   },
   {
    "id": "nordrhein-westfalen",
    "name": "Nordrhein-Westfalen",
-   "extract_date": "2026-11-19T21:22:20.000Z",
-   "count": 39205
+   "extract_date": "2026-11-24T21:21:23.000Z",
+   "count": 39214
   },
   {
    "id": "rheinland-pfalz",
    "name": "Rheinland-Pfalz",
-   "extract_date": "2026-11-19T21:22:20.000Z",
-   "count": 11058
+   "extract_date": "2026-11-24T21:21:23.000Z",
+   "count": 11063
   },
   {
    "id": "saarland",
    "name": "Saarland",
-   "extract_date": "2026-11-19T21:22:20.000Z",
-   "count": 2698
+   "extract_date": "2026-11-24T21:21:23.000Z",
+   "count": 2700
   },
   {
    "id": "sachsen",
    "name": "Sachsen",
-   "extract_date": "2026-11-19T21:22:20.000Z",
-   "count": 12726
+   "extract_date": "2026-11-24T21:21:23.000Z",
+   "count": 12735
   },
   {
    "id": "sachsen-anhalt",
    "name": "Sachsen-Anhalt",
-   "extract_date": "2026-11-19T21:22:20.000Z",
-   "count": 6805
+   "extract_date": "2026-11-24T21:21:23.000Z",
+   "count": 6808
   },
   {
    "id": "schleswig-holstein",
    "name": "Schleswig-Holstein",
-   "extract_date": "2026-11-19T21:22:20.000Z",
-   "count": 7985
+   "extract_date": "2026-11-24T21:21:23.000Z",
+   "count": 7988
   },
   {
    "id": "thueringen",
    "name": "Thüringen",
-   "extract_date": "2026-11-19T21:22:20.000Z",
-   "count": 7589
+   "extract_date": "2026-11-24T21:21:23.000Z",
+   "count": 7591
   }
  ],
- "total_places": 223127,
+ "total_places": 223226,
+ "gastro_places": 210850,
+ "gastro_note": "Gastronomie (OSM amenity=restaurant|cafe|fast_food|bar|pub|biergarten|ice_cream|food_court) liegt getrennt in c-g/ und index-g.json und zählt nicht zu total_places.",
  "notes": [
   "Objekte ohne Namen werden nicht übernommen.",
   "Adressen nur aus OSM-Tags addr:*; keine Reverse-Geokodierung.",

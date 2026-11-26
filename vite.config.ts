@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig, type Plugin } from 'vite';
-import { TILE_PROVIDER } from './src/provider';
+import { ROUTE_ORIGINS, TILE_PROVIDER } from './src/provider';
 import { prerender } from './scripts/prerender.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -21,7 +21,7 @@ const csp = (): string => [
   "style-src-attr 'unsafe-inline'", // MapLibre setzt Positionen per style-Attribut
   `img-src 'self' data: blob: ${TILE_PROVIDER.origin}`,
   "font-src 'self'",
-  `connect-src 'self' ${TILE_PROVIDER.origin}`,
+  `connect-src 'self' ${TILE_PROVIDER.origin} ${ROUTE_ORIGINS.join(' ')}`, // Routen in der App (Ursprünge aus src/provider.ts, nur nach Nutzeraktion genutzt)
   "worker-src 'self' blob:",
   "child-src 'self' blob:",
   "manifest-src 'self'",

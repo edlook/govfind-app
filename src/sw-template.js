@@ -45,8 +45,8 @@ self.addEventListener('fetch', (e) => {
   if (u.origin !== location.origin) return;
   if (req.mode === 'navigate') { e.respondWith(networkFirst(req, SHELL, './')); return; }
   const rel = u.href.slice(scope.length);
-  if (rel === 'data/index.json' || rel === 'data/places-meta.json') { e.respondWith(networkFirst(req, DATA)); return; }
-  if (rel.startsWith('data/c/') || rel === 'data/gazetteer.json') { e.respondWith(staleWhileRevalidate(req, DATA)); return; }
+  if (rel === 'data/index.json' || rel === 'data/index-g.json' || rel === 'data/places-meta.json') { e.respondWith(networkFirst(req, DATA)); return; }
+  if (rel.startsWith('data/c/') || rel.startsWith('data/c-g/') || rel === 'data/gazetteer.json') { e.respondWith(staleWhileRevalidate(req, DATA)); return; }
   if (rel.startsWith('assets/')) { e.respondWith(caches.match(req, MATCH).then((h) => h || fetch(req).then((res) => { if (res.ok) caches.open(SHELL).then((c) => c.put(req, res.clone())); return res; }))); return; }
   e.respondWith(staleWhileRevalidate(req, SHELL));
 });

@@ -25,7 +25,7 @@ import { gzipSync } from 'node:zlib';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import OpeningHours from 'opening_hours';
-import { classify, OVERPASS_FILTERS, norm, GROUP_OF } from '../shared/taxonomy.js';
+import { classify, OVERPASS_FILTERS, norm, GROUP_OF, isGastroSub } from '../shared/taxonomy.js';
 import { STATES } from '../shared/states.js';
 import { REGIONS, ALL_REGIONS } from './lib/regions.mjs';
 import { scanPbf } from './lib/pbf-scan.mjs';
@@ -36,7 +36,7 @@ const UA = 'GOVfind-build/1.0';
 
 // ---------- CLI ----------
 export function parseArgs(argv) {
-  const a = { source: 'geofabrik', regions: ALL_REGIONS.slice(), out: join(ROOT, 'public', 'data'), cache: join(ROOT, '.cache'), refresh: false, offline: false, stage: 'all', resume: false, keepPbf: false, cellMaxKb: 250, work: null };
+  const a = { source: 'geofabrik', regions: ALL_REGIONS.slice(), out: join(ROOT, 'public', 'data'), cache: join(ROOT, '.cache'), refresh: false, offline: false, stage: 'all', resume: false, keepPbf: false, cellMaxKb: 250, gastroCellMaxKb: 150, work: null };
   for (let i = 0; i < argv.length; i++) {
     const k = argv[i];
     const v = () => argv[++i];
@@ -53,6 +53,7 @@ export function parseArgs(argv) {
     else if (k === '--resume') a.resume = true;
     else if (k === '--keep-pbf') a.keepPbf = true;
     else if (k === '--cell-max-kb') a.cellMaxKb = Number(v());
+    else if (k === '--gastro-cell-max-kb') a.gastroCellMaxKb = Number(v());
     else if (k === '--refresh') a.refresh = true;
     else if (k === '--offline') a.offline = true;
     else if (k === '--overpass-url') a.overpassUrl = v();
@@ -198,7 +199,28 @@ export function toPlace(c, region) {
   p.reg = region.id;
   if (cl.by !== 'tag') p.cb = cl.by;
   if (cl.flags.length) p.fl = cl.flags;
+  if (isGastroSub(cl.sub)) {
+    // Gastronomie: nur Felder, die in OSM stehen (sonst fehlt der Schlüssel -> UI "Keine Angabe"); Betreiber/Prüfdatum sparen wir ein
+    delete p.op; delete p.cd; delete p.ap;
+    const cu = cuisineList(t.cuisine); if (cu.length) p.cu = cu;
+    const vg = DIET[t['diet:vegetarian']]; if (vg) p.vg = vg;
+    const vn = DIET[t['diet:vegan']]; if (vn) p.vn = vn;
+    if (t.outdoor_seating === 'yes') p.os = true; else if (t.outdoor_seating === 'no') p.os = false;
+  }
   return p;
+}
+
+const DIET = { yes: 'yes', only: 'only', limited: 'limited', no: 'no' };
+/** OSM cuisine=* ("italian;pizza", "regional") -> bis zu 3 Slugs [a-z0-9_] */
+export function cuisineList(v) {
+  if (!v) return [];
+  const out = [];
+  for (const x of String(v).split(/[;,]/)) {
+    const c = x.trim().toLowerCase().replace(/[\s-]+/g, '_');
+    if (/^[a-z][a-z0-9_]{1,30}$/.test(c) && !out.includes(c)) out.push(c);
+    if (out.length === 3) break;
+  }
+  return out;
 }
 
 /** einfache Duplikat-Entfernung: gleicher Name + gleiche Unterkategorie < 40 m -> Fläche/Relation vor Knoten (O(n), Gitter) */
@@ -245,9 +267,11 @@ async function extractRegion(id, def, args) {
   }
   const region = { ...def, id };
   const mapped = raw.candidates.map((c) => toPlace(c, region)).filter(Boolean);
-  const places = dedupe(mapped);
-  console.log(`  ${raw.candidates.length} Kandidaten -> ${mapped.length} Einträge -> ${places.length} nach Duplikat-Entfernung (${((Date.now() - t0) / 1000).toFixed(0)} s)`);
-  const res = { v: 1, id, def, extractTs: raw.extractTs, places, osmPlaces: raw.places, admin8: raw.admin8 || [], stats: { candidates: raw.candidates.length, mapped: mapped.length, ...(raw.stats || {}) } };
+  const deduped = dedupe(mapped);
+  const places = deduped.filter((p) => !isGastroSub(p.s)); // staatliche Einrichtungen
+  const gastro = deduped.filter((p) => isGastroSub(p.s)); // Gastronomie (eigene Dateien)
+  console.log(`  ${raw.candidates.length} Kandidaten -> ${mapped.length} Einträge -> ${deduped.length} nach Duplikat-Entfernung: ${places.length} Einrichtungen + ${gastro.length} Gastronomie (${((Date.now() - t0) / 1000).toFixed(0)} s)`);
+  const res = { v: 1, id, def, extractTs: raw.extractTs, places, gastro, osmPlaces: raw.places, admin8: raw.admin8 || [], stats: { candidates: raw.candidates.length, mapped: mapped.length, ...(raw.stats || {}) } };
   mkdirSync(args.work, { recursive: true });
   writeFileSync(join(args.work, id + '.json'), JSON.stringify(res));
   return res;
@@ -334,6 +358,34 @@ function mergeAll(results, args) {
   return { placesAll, regionsOut, subCounts, plz };
 }
 
+/** Gastronomie getrennt: c-g/<zelle>.json + index-g.json (lazy, nur bei eingeschalteter Gruppe geladen). Gibt Kennzahlen oder null zurück. */
+function writeGastro(results, args, builtAt, extractDate) {
+  rmSync(join(args.out, 'c-g'), { recursive: true, force: true });
+  rmSync(join(args.out, 'index-g.json'), { force: true });
+  const seen = new Set(); const all = []; const subs = {}; const byRegion = new Map(); const cuisines = {}; let dup = 0;
+  for (const r of results) for (const p of r.gastro || []) {
+    if (seen.has(p.id)) { dup++; continue; }
+    seen.add(p.id); all.push(p); subs[p.s] = (subs[p.s] || 0) + 1; byRegion.set(p.reg, (byRegion.get(p.reg) || 0) + 1);
+    for (const c of p.cu || []) cuisines[c] = (cuisines[c] || 0) + 1;
+  }
+  if (!all.length) return null;
+  mkdirSync(join(args.out, 'c-g'), { recursive: true });
+  const files = buildCells(all, args.gastroCellMaxKb * 1024).sort((a, b) => (a.key < b.key ? -1 : 1));
+  const cells = {}; let raw = 0, gz = 0, maxGz = 0, maxRaw = 0;
+  for (const f of files) { writeFileSync(join(args.out, 'c-g', f.key + '.json'), f.json); cells[f.key] = f.count; raw += f.json.length; gz += f.gz; maxGz = Math.max(maxGz, f.gz); maxRaw = Math.max(maxRaw, f.json.length); }
+  const regions = results.map((r) => {
+    const o = { id: r.id, name: r.def.name, state: r.def.state || null, count: byRegion.get(r.id) || 0, whole_area_is_city: !!r.def.wholeAreaIsCity };
+    if (o.whole_area_is_city) o.cells = files.filter((f) => f.regs.includes(r.id)).map((f) => f.key);
+    return o;
+  });
+  const topCuisines = Object.fromEntries(Object.entries(cuisines).sort((a, b) => b[1] - a[1]).slice(0, 60));
+  const index = { v: 1, built_at: builtAt, extract_date: extractDate, cell_size_deg: 0.25, dir: 'c-g', cells, regions, subs, cuisines: topCuisines, total: all.length };
+  writeFileSync(join(args.out, 'index-g.json'), JSON.stringify(index));
+  if (dup) console.log(`  Gastronomie: ${dup} doppelte OSM-IDs zwischen Auszügen verworfen`);
+  console.log(`Gastronomie: ${all.length} Objekte, ${files.length} Zellen (${files.filter((f) => f.key.includes('-')).length} durch Teilung), ${(raw / 1048576).toFixed(1)} MB roh, ${(gz / 1048576).toFixed(1)} MB gzip, größte Zelle ${(maxRaw / 1024).toFixed(0)} KB roh / ${(maxGz / 1024).toFixed(0)} KB gzip; index-g.json ${(statSync(join(args.out, 'index-g.json')).size / 1024).toFixed(0)} KB`);
+  return { total: all.length, files: files.length, subs, byRegion: Object.fromEntries(byRegion), cuisines: topCuisines, rawBytes: raw, gzBytes: gz };
+}
+
 function writeOutput(results, args) {
   const { placesAll, regionsOut, subCounts, plz } = mergeAll(results, args);
   rmSync(join(args.out, 'c'), { recursive: true, force: true });
@@ -352,7 +404,8 @@ function writeOutput(results, args) {
   const builtAt = new Date().toISOString();
   const extractDates = results.map((r) => r.extractTs).filter(Boolean).sort();
   const stand = extractDates.length ? extractDates[extractDates.length - 1] : builtAt;
-  const index = { v: 2, built_at: builtAt, extract_date: extractDates.length ? stand : null, cell_size_deg: 0.25, cells: cellCounts, regions: regionsOut, subs: subCounts, gazetteer: 'gazetteer.json' };
+  const gastro = writeGastro(results, args, builtAt, extractDates.length ? stand : null);
+  const index = { v: 2, built_at: builtAt, extract_date: extractDates.length ? stand : null, cell_size_deg: 0.25, cells: cellCounts, regions: regionsOut, subs: subCounts, gazetteer: 'gazetteer.json', ...(gastro ? { gastro: 'index-g.json' } : {}) };
   writeFileSync(join(args.out, 'index.json'), JSON.stringify(index));
   // Orte: [Name, lat, lng, Art c|t|v|s|n, Einwohner|null, Region-ID (ganzes Gebiet = Stadt)|null]; PLZ: [plz, lat, lng]
   writeFileSync(join(args.out, 'gazetteer.json'), JSON.stringify({ v: 1, built_at: builtAt, places: gaz.rows, plz }));
@@ -364,17 +417,18 @@ function writeOutput(results, args) {
     extract_origin: args.source === 'geofabrik' ? 'Geofabrik (download.geofabrik.de), Länderauszüge' : args.source,
     regions: regionsOut.map((r) => ({ id: r.id, name: r.name, extract_date: r.extract_date, count: r.count })),
     total_places: total,
+    ...(gastro ? { gastro_places: gastro.total, gastro_note: 'Gastronomie (OSM amenity=restaurant|cafe|fast_food|bar|pub|biergarten|ice_cream|food_court) liegt getrennt in c-g/ und index-g.json und zählt nicht zu total_places.' } : {}),
     notes: ['Objekte ohne Namen werden nicht übernommen.', 'Adressen nur aus OSM-Tags addr:*; keine Reverse-Geokodierung.', 'Orte (Wo?) aus OSM place-Knoten und Gemeinde-Grenzrelationen (admin_level=8); PLZ-Mittelpunkte (Median) nur aus Einrichtungen mit addr:postcode.'],
   };
   writeFileSync(join(args.out, 'places-meta.json'), JSON.stringify(meta, null, 1));
   const gzGaz = gzipSync(readFileSync(join(args.out, 'gazetteer.json')), { level: 6 }).length;
   console.log(`Fertig: ${total} Einrichtungen, ${files.length} Zellen (${split} durch Teilung), ${gaz.rows.length} Orte (+${gaz.adminAdded} aus admin_level=8), ${plz.length} PLZ -> ${args.out}`);
   console.log(`  Zellen: ${(raw / 1048576).toFixed(1)} MB roh, ${(gz / 1048576).toFixed(1)} MB gzip (Stufe 6), größte Zelle ${(maxRaw / 1024).toFixed(0)} KB roh / ${(maxGz / 1024).toFixed(0)} KB gzip, über Limit: ${overLimit}; gazetteer.json ${(statSync(join(args.out, 'gazetteer.json')).size / 1024).toFixed(0)} KB (${(gzGaz / 1024).toFixed(0)} KB gzip); index.json ${(statSync(join(args.out, 'index.json')).size / 1024).toFixed(0)} KB`);
-  qualityReport(placesAll, args);
+  qualityReport(placesAll, args, gastro);
 }
 
 /** Qualitätsübersicht (Konsole + .cache/quality.json) */
-function qualityReport(places, args) {
+function qualityReport(places, args, gastro) {
   const bySub = {}; const byGroup = {}; const byState = {}; let byName = 0; let noAddr = 0;
   for (const p of places) {
     bySub[p.s] = (bySub[p.s] || 0) + 1; const g = GROUP_OF[p.s]; byGroup[g] = (byGroup[g] || 0) + 1;
@@ -386,7 +440,7 @@ function qualityReport(places, args) {
   console.log('  Gruppen: ' + Object.entries(byGroup).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${v}`).join(', '));
   console.log(`  schule_sonstige: ${bySub.schule_sonstige || 0} (${(((bySub.schule_sonstige || 0) / n) * 100).toFixed(1)} %), cb:"name": ${byName} (${((byName / n) * 100).toFixed(1)} %), ohne Adresse: ${noAddr} (${((noAddr / n) * 100).toFixed(1)} %)`);
   mkdirSync(args.cache, { recursive: true });
-  writeFileSync(join(args.cache, 'quality.json'), JSON.stringify({ total: places.length, bySub, byGroup, byState, classifiedByName: byName, noAddress: noAddr }, null, 1));
+  writeFileSync(join(args.cache, 'quality.json'), JSON.stringify({ total: places.length, bySub, byGroup, byState, classifiedByName: byName, noAddress: noAddr, gastro }, null, 1));
 }
 
 async function main() {

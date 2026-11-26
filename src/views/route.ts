@@ -1,14 +1,35 @@
-import { A, S } from '../ctx';
+import { A, S, on } from '../ctx';
 import { distanceKm, findPlace } from '../data';
-import { t } from '../i18n';
-import { getRoute, navigate } from '../router';
-import type { Place } from '../types';
-import { banner, distanceText, pageHeader, skeletonRows } from '../ui/components';
+import { getLang, t } from '../i18n';
+import { ROUTE_PROVIDERS } from '../provider';
+import { cachedRoute, fetchRoute, RouteError, routeEnabled, stepKey, type AnyRoute, type Coord, type Itinerary, type RoadRoute, type TransitRoute, type TravelMode } from '../routing';
+import { getRoute } from '../router';
+import type { LatLng, Place } from '../types';
+import { backButton, banner, distanceText, skeletonRows } from '../ui/components';
 import { h, replace } from '../ui/dom';
 import { icon } from '../ui/icons';
-import { appleDir, geoUri, googleDir, isAndroid, isApple, type TravelMode } from '../util';
+import { appleDir, geoUri, googleDir, isAndroid, isApple } from '../util';
 
-let mode: TravelMode = ((): TravelMode => { try { const v = localStorage.getItem('gf.routemode'); return v === 'car' || v === 'transit' ? v : 'walk'; } catch { return 'walk'; } })();
+const MODES: TravelMode[] = ['walk', 'car', 'transit'];
+const savedMode = (): TravelMode => { try { const v = localStorage.getItem('gf.routemode'); return v === 'car' || v === 'transit' ? v : 'walk'; } catch { return 'walk'; } };
+let mode: TravelMode = savedMode();
+
+/** „Route“ wurde auf der Karte der Einrichtung getippt: nur dann rechnet die Route-Ansicht sofort (eine Anfrage an den Dienst).
+ *  Beim Neuladen, Zurück/Vorwärts oder über einen Link bleibt es bei einer Schaltfläche „Route berechnen“ (keine Anfrage ohne Aktion). */
+let armedFor: string | null = null;
+export const armRoute = (id: string): void => { armedFor = id; setTimeout(() => { if (armedFor === id) armedFor = null; }, 4000); }; // verfällt, falls der Link in neuem Tab geöffnet wurde
+
+export const fmtDuration = (s: number): string => {
+  const min = Math.max(1, Math.round(s / 60));
+  return min >= 60 ? t('route.dur.hm', { h: Math.floor(min / 60), m: min % 60 }) : t('route.dur.min', { m: min });
+};
+const fmtTime = (iso: string): string => new Intl.DateTimeFormat(getLang(), { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Berlin' }).format(new Date(iso));
+/** "Text {tag} Text" -> [Text, Knoten, Text] */
+function withNode(msg: string, tag: string, node: Node): Node[] {
+  const parts = msg.split(`{${tag}}`);
+  return parts.length === 2 ? [document.createTextNode(parts[0]!), node, document.createTextNode(parts[1]!)] : [document.createTextNode(msg)];
+}
+const ext = (href: string, label: string): HTMLAnchorElement => h('a', { href, target: '_blank', rel: 'noopener noreferrer' }, label);
 
 export async function renderRoute(host: HTMLElement, id: string, hint: string | null, onLoaded: (p: Place | null) => void): Promise<void> {
   replace(host, h('div', { class: 'place' }, skeletonRows(3)));
@@ -16,36 +37,183 @@ export async function renderRoute(host: HTMLElement, id: string, hint: string | 
   try { p = await findPlace(id, hint); } catch { p = null; }
   if (getRoute().name !== 'route' || getRoute().id !== id) return;
   onLoaded(p);
-  const back = (): void => navigate(`/einrichtung/${id}${hint ? '?c=' + hint : ''}`);
-  if (!p) { replace(host, h('div', { class: 'place' }, pageHeader(t('route.title'), back), banner('warn', t('place.removed.title')))); return; }
+  const back = (): void => A.back(`/einrichtung/${id}${hint ? '?c=' + hint : ''}`);
+  const head = (): HTMLElement => h('div', { class: 'page-head' }, backButton(back), h('h1', null, t('route.title')));
+  if (!p) { replace(host, h('div', { class: 'place' }, head(), banner('warn', t('place.removed.title')))); return; }
   const place = p;
+  const dest: LatLng = { lat: place.la, lng: place.ln };
+  const armed = armedFor === id; armedFor = null;
+
+  if (!routeEnabled(mode)) mode = MODES.find(routeEnabled) ?? 'walk';
+  let result: AnyRoute | null = null;
+  let error: RouteError | null = null;
+  let loading = false;
+  let started = armed;
+  let selected = 0;
+  let seq = 0;
+  const here = (): boolean => getRoute().name === 'route' && getRoute().id === id;
   const body = h('div', { class: 'route' });
-  const paint = (): void => {
+
+  // ---- Karte ----
+  const draw = (): void => {
     const user = S.userLoc;
-    S.map?.setRoute(user, user ? { lat: place.la, lng: place.ln } : null);
-    const seg = h('div', { class: 'segmented', role: 'radiogroup', 'aria-label': t('route.mode.label') },
-      (['walk', 'car', 'transit'] as TravelMode[]).map((m) => h('button', { class: 'seg', type: 'button', role: 'radio', 'aria-checked': String(m === mode), onclick: () => { mode = m; try { localStorage.setItem('gf.routemode', m); } catch { /* ignore */ } paint(); } },
-        icon(m === 'walk' ? 'walk' : m === 'car' ? 'car' : 'bus', { size: 20 }), h('span', null, t(`route.mode.${m}`)))));
+    const m = S.map;
+    if (!m) return;
+    if (result?.kind === 'road') { m.setRouteLines([{ coords: result.coords, kind: 'road' }]); A.fitCoords(result.coords); return; }
+    if (result?.kind === 'transit') {
+      const it = result.itineraries[selected];
+      if (it) {
+        const lines = it.legs.filter((l) => l.coords.length > 1).map((l) => ({ coords: l.coords, kind: l.walk ? 'walk' as const : 'transit' as const, ...(l.color && !l.walk ? { color: l.color } : {}) }));
+        m.setRouteLines(lines);
+        const all = it.legs.flatMap((l) => l.coords);
+        if (all.length) A.fitCoords(all);
+        return;
+      }
+    }
+    // noch keine berechnete Route: Luftlinie (auf dem Gerät berechnet)
+    m.setRoute(user, user ? dest : null);
+    if (user) A.fitCoords([[user.lng, user.lat], [dest.lng, dest.lat]]);
+  };
+
+  // ---- Berechnen ----
+  const load = async (cursor?: string): Promise<void> => {
+    const user = S.userLoc;
+    if (!user) return;
+    const my = ++seq;
+    started = true; loading = true; error = null; paint();
+    try {
+      const r = await fetchRoute(mode, user, dest, { lang: getLang(), ...(cursor ? { cursor } : {}) });
+      if (my !== seq || !here()) return;
+      result = r; selected = 0;
+    } catch (e) {
+      if (my !== seq || !here()) return;
+      error = e instanceof RouteError ? e : new RouteError('network');
+      result = null;
+    }
+    loading = false; paint(); draw();
+  };
+  const useCacheOrIdle = (): void => {
+    const user = S.userLoc;
+    const hit = user ? cachedRoute(mode, user, dest) : null;
+    if (hit) { result = hit; started = true; selected = 0; }
+  };
+
+  // ---- Darstellung ----
+  const external = (primary: boolean): HTMLElement => {
     const links: HTMLElement[] = [
-      h('a', { class: 'btn btn-primary btn-block', href: googleDir(place, mode), target: '_blank', rel: 'noopener noreferrer' }, icon('navigate'), h('span', null, t('route.open_google')), icon('external', { size: 16 })),
+      h('a', { class: ['btn', 'btn-block', primary ? 'btn-primary' : ''], href: googleDir(place, mode), target: '_blank', rel: 'noopener noreferrer' }, icon('navigate'), h('span', null, t('route.open_google')), icon('external', { size: 16 })),
     ];
     if (isApple()) links.push(h('a', { class: 'btn btn-block', href: appleDir(place, mode), target: '_blank', rel: 'noopener noreferrer' }, icon('map'), h('span', null, t('route.open_apple')), icon('external', { size: 16 })));
     if (isAndroid()) links.push(h('a', { class: 'btn btn-block', href: geoUri(place) }, icon('map'), h('span', null, t('route.open_other'))));
+    return h('div', { class: 'stack' }, links, h('p', { class: 'meta' }, t('route.external_notice')));
+  };
+  const beeline = (): HTMLElement | null => S.userLoc ? h('p', { class: 'beeline' }, t('route.beeline', { distance: distanceText(distanceKm(S.userLoc, dest)) })) : null;
+
+  const roadView = (r: RoadRoute): HTMLElement => {
+    const steps = r.steps.filter((s, i) => s.distanceM > 0 || s.type === 'arrive' || i === 0);
+    return h('div', null,
+      h('p', { class: 'route-sum' }, h('strong', null, fmtDuration(r.durationS)), ' · ', distanceText(r.distanceM / 1000)),
+      h('p', { class: 'meta' }, t('route.result_service', { service: r.provider })),
+      steps.length ? h('details', { class: 'steps' }, h('summary', null, t('route.steps.title', { count: steps.length })),
+        h('ol', { class: 'step-list' }, steps.map((s) => {
+          const k = stepKey(s);
+          const text = t(k.key, k.params) + (k.onto && s.name ? ' ' + t('route.step.onto', { street: s.name }) : '');
+          return h('li', null, h('span', { class: 'step-text' }, text), s.distanceM >= 10 ? h('span', { class: 'meta step-dist' }, distanceText(s.distanceM / 1000)) : null);
+        }))) : null);
+  };
+
+  const lineChip = (l: Itinerary['legs'][number]): HTMLElement => {
+    const el = h('span', { class: 'line-chip' }, icon(l.mode === 'BUS' || l.mode === 'COACH' ? 'bus' : 'train', { size: 14 }), h('span', null, l.line ?? l.mode));
+    if (l.chipBg) { el.style.background = l.chipBg; el.style.color = l.chipFg ?? '#fff'; el.style.borderColor = 'transparent'; }
+    return el;
+  };
+  const itinView = (it: Itinerary, i: number): HTMLElement => {
+    const sel = i === selected;
+    const transitLegs = it.legs.filter((l) => !l.walk);
+    const card = h('div', { class: ['itin', sel ? 'sel' : ''] });
+    const top = h('button', { class: 'itin-top', type: 'button', 'aria-pressed': String(sel),
+      'aria-label': t('route.transit.select_aria', { n: i + 1, from: fmtTime(it.start), to: fmtTime(it.end), dur: fmtDuration(it.durationS) }),
+      onclick: () => { selected = i; paint(); draw(); } },
+      h('span', { class: 'itin-times' }, `${fmtTime(it.start)} – ${fmtTime(it.end)}`),
+      h('span', { class: 'itin-dur' }, fmtDuration(it.durationS), ' · ', t('route.transit.transfers', { count: it.transfers })),
+      h('span', { class: 'itin-lines' }, transitLegs.length ? transitLegs.map(lineChip) : h('span', { class: 'meta' }, t('route.transit.walk', { dur: fmtDuration(it.durationS) }))));
+    card.append(top);
+    if (sel) {
+      card.append(h('ol', { class: 'legs' }, it.legs.map((l) => l.walk
+        ? h('li', { class: 'leg leg-walk' }, icon('walk', { size: 16 }), h('span', null, t('route.transit.walk', { dur: fmtDuration(l.durationS) }) + (l.distanceM ? ` (${distanceText(l.distanceM / 1000)})` : '')))
+        : h('li', { class: 'leg' }, lineChip(l),
+          h('span', { class: 'leg-text' },
+            h('strong', null, `${fmtTime(l.fromTime)} ${l.from}`), l.track ? ` · ${t('route.transit.platform', { track: l.track })}` : '',
+            l.headsign ? h('span', { class: 'meta block' }, t('route.transit.direction', { to: l.headsign })) : null,
+            h('span', { class: 'block' }, `${fmtTime(l.toTime)} ${l.to}`),
+            l.realtime ? h('span', { class: 'meta block' }, t('route.transit.realtime')) : null)))));
+    }
+    return card;
+  };
+  const transitView = (r: TransitRoute): HTMLElement => {
+    const src = ext(ROUTE_PROVIDERS.transit.sourcesUrl, t('route.transit.sources'));
+    if (!r.itineraries.length) return h('div', null, banner('info', t('route.transit.none')), r.later ? h('button', { class: 'btn btn-block', type: 'button', onclick: () => { void load(r.later); } }, t('route.transit.later')) : null);
+    return h('div', null,
+      h('h2', { class: 'route-sub' }, t('route.transit.title')),
+      r.earlier ? h('button', { class: 'btn btn-block', type: 'button', onclick: () => { void load(r.earlier); } }, t('route.transit.earlier')) : null,
+      h('div', { class: 'itins' }, r.itineraries.map(itinView)),
+      r.later ? h('button', { class: 'btn btn-block', type: 'button', onclick: () => { void load(r.later); } }, t('route.transit.later')) : null,
+      h('p', { class: 'meta' }, t('route.result_service', { service: r.provider }).replace(/ Ohne Verkehrslage\.| Without traffic conditions\./, '')),
+      h('p', { class: 'meta' }, ...withNode(t('route.transit.data', { link: '{link}' }), 'link', src)));
+  };
+
+  function paint(): void {
+    const user = S.userLoc;
+    const svc = ROUTE_PROVIDERS[mode === 'transit' ? 'transit' : mode];
+    const seg = h('div', { class: 'segmented', role: 'radiogroup', 'aria-label': t('route.mode.label') },
+      MODES.filter(routeEnabled).map((m) => h('button', { class: 'seg', type: 'button', role: 'radio', 'aria-checked': String(m === mode),
+        onclick: () => {
+          if (m === mode) return;
+          mode = m; try { localStorage.setItem('gf.routemode', m); } catch { /* ignore */ }
+          seq++; result = null; error = null; loading = false; started = false; selected = 0; useCacheOrIdle();
+          // Wechsel des Verkehrsmittels = Aktion der Nutzenden: sofort berechnen
+          if (S.userLoc && !result) void load(); else { paint(); draw(); }
+        } },
+        icon(m === 'walk' ? 'walk' : m === 'car' ? 'car' : 'bus', { size: 20 }), h('span', null, t(`route.mode.${m}`)))));
+    let main: Node | null;
+    if (!routeEnabled(mode)) main = h('div', null, banner('info', t('route.err.disabled')), beeline(), external(true));
+    else if (!user && S.geo === 'loading') main = h('div', null, h('p', { role: 'status', class: 'meta' }, t('route.locating')), skeletonRows(2));
+    else if (!user) main = h('div', null, h('p', { class: 'meta' }, t('route.no_location')),
+      h('button', { class: 'btn btn-primary btn-block', type: 'button', onclick: () => { void A.locate({ pan: false }).then((l) => { if (l) { useCacheOrIdle(); if (!result) void load(); else { paint(); draw(); } } else paint(); }); } }, icon('locate'), h('span', null, t('map.control.locate'))),
+      external(false));
+    else if (loading) main = h('div', null, h('p', { class: 'visually-hidden', role: 'status' }, t('route.calculating')), skeletonRows(3), beeline());
+    else if (error) {
+      main = h('div', null, banner('warn', t(`route.err.${error.kind}`), null, error.kind === 'disabled' ? [] : [h('button', { class: 'btn', type: 'button', onclick: () => { void load(); } }, t('common.action.retry'))]),
+        h('h2', { class: 'route-sub' }, t('route.fallback.title')), h('p', { class: 'beeline' }, t('route.beeline', { distance: distanceText(distanceKm(user, dest)) })), h('p', { class: 'meta' }, t('route.beeline_note')), external(true));
+    } else if (!started) {
+      main = h('div', null, beeline(),
+        h('div', { class: 'card' }, h('p', { class: 'meta' }, t('route.send_notice', { service: svc.name })),
+          h('button', { class: 'btn btn-primary btn-block', type: 'button', onclick: () => { void load(); } }, icon('route'), h('span', null, t('route.calculate')))),
+        external(false));
+    } else if (result?.kind === 'road') main = h('div', null, roadView(result), h('p', { class: 'meta' }, t('route.computed_by', { service: svc.name })), external(false));
+    else if (result?.kind === 'transit') main = h('div', null, transitView(result), external(false));
+    else main = external(false);
+
+    const road = mode !== 'transit' && result?.kind === 'road';
     replace(body,
       h('div', { class: 'ft' },
         h('div', null, h('span', { class: 'meta' }, t('route.from')), h('p', { class: 'strong' }, user ? t('route.from_my_location') : '–')),
         h('div', null, h('span', { class: 'meta' }, t('route.to')), h('p', { class: 'strong', lang: 'de' }, place.nm))),
-      user ? null : h('div', null, h('p', { class: 'meta' }, t('route.error.no_location')),
-        h('button', { class: 'btn', type: 'button', onclick: () => { void A.locate({ pan: false }).then(paint); } }, icon('locate'), h('span', null, t('map.control.locate')))),
-      seg,
-      user ? h('p', { class: 'beeline' }, t('route.beeline', { distance: distanceText(distanceKm(user, { lat: place.la, lng: place.ln })) })) : null,
-      user ? h('p', { class: 'meta' }, t('route.beeline_note')) : null,
-      mode === 'transit' ? h('p', { class: 'meta' }, t('route.transit.hint')) : null,
-      h('div', { class: 'stack' }, links),
+      seg, main,
+      road ? h('p', { class: 'meta' }, ...withNode(t('route.attribution', { osm: '{osm}', service: svc.name }), 'osm', ext('https://www.openstreetmap.org/copyright', t('route.attribution.osm'))), ' ', ext('https://www.openstreetmap.org/fixthemap', t('route.fixthemap'))) : null,
       !S.online ? banner('info', t('route.offline')) : null,
-      h('p', { class: 'meta' }, t('route.external_notice')),
       h('p', { class: 'meta' }, t('route.disclaimer')));
-  };
-  paint();
-  replace(host, h('div', { class: 'place' }, pageHeader(t('route.title'), back), body));
+  }
+
+  // Standort kommt später (stille Abfrage nach dem Start / „Mein Standort“): Ansicht dann fortsetzen
+  const off = on('loc', () => {
+    if (!here()) { off(); return; }
+    if (!S.userLoc) { paint(); return; }
+    off(); useCacheOrIdle();
+    if (armed && !result && !loading) void load(); else { paint(); draw(); }
+  });
+  useCacheOrIdle();
+  if (armed && S.userLoc && !result) void load(); else paint();
+  replace(host, h('div', { class: 'place' }, head(), body));
+  draw();
 }

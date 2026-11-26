@@ -41,6 +41,13 @@ Für große Läufe `NODE_OPTIONS=--max-old-space-size=6144` setzen (gemessen: Sp
 - **Letzte Änderung (`ts`):** wird nicht gelesen (kein `withInfo` beim PBF-Parsen, spart Zeit/Größe), die Zeile „Letzte Bearbeitung“ in den Details erscheint daher nicht; Datenstand ist der Auszugs-Zeitstempel.
 - **Bekannte Grenzen:** Nur OSM-Daten (Vollständigkeit je Land sehr unterschiedlich, z. B. Brandenburg 7 435 vs. Sachsen 12 726 Objekte); 35,6 % der Objekte ohne Adresse (`addr:*` fehlt in OSM); `ts`/„Letzte Bearbeitung“ fehlt; Suche „Wo?“ löst mehrdeutige Ortsnamen auf den größten Treffer auf; Suche nur mit „Was?“ lädt höchstens die 12 Zellen nächst der Kartenmitte; Detail-URLs ohne `?c=` werden nur in schon geladenen Zellen gesucht (kein bundesweiter Scan).
 - **iCloud-Hinweis:** Der Projektordner liegt auf dem iCloud-synchronisierten Desktop. Beim schnellen Neuschreiben von `public/data/c` und `dist` entstanden dort Konfliktkopien „<name> 2.json“ (hunderte). Nach jedem Datenbau `find public/data/c -name "* 2.json" -delete` prüfen bzw. den Ordner von der Synchronisierung ausnehmen (`.nosync`).
+### Gruppe Gastronomie (9. Gruppe, Stand 2026-11-26)
+- Quelle nur OSM (`amenity=restaurant|cafe|fast_food|bar|pub|biergarten|ice_cream|food_court`, nur mit Namen). Kein Scraping von Bewertungsportalen.
+- Derselbe Lauf liest Behörden und Gastronomie; `extract` schreibt `places` und `gastro` je Region nach `.cache/regions/<id>.json`. `merge` schreibt Gastronomie getrennt: `public/data/c-g/<zelle>.json` (Zellgrenze `--gastro-cell-max-kb`, Standard 150) und `public/data/index-g.json`. `index.json` verweist nur mit `"gastro": "index-g.json"` darauf; `index.subs`, `total_places`, SEO und Gazetteer bleiben Behörden-only.
+- Zusatzfelder (nur wenn in OSM vorhanden): `cu` (cuisine-Slugs, max. 3), `vg`/`vn` (`diet:vegetarian`/`diet:vegan`: yes|only|limited|no), `os` (outdoor_seating true/false), dazu `wc`, `ph`, `web`, `oh`, `em`, Adresse.
+- Das Frontend lädt `index-g.json` und `c-g/` erst bei aktivem Gastro-Filter oder passender Suche (`loadGastroIndex`, `gastroCellsForBbox`, Zellschlüssel mit Präfix `g:`).
+- Vorab-Rendering schließt die Gruppe aus (`scripts/prerender.mjs`).
+
 ## Datenstand und Größen
 Stand: OSM-Auszüge vom 2026-11-19 (Geofabrik), Bau am 2026-11-20. **223 127 Einrichtungen**, 831 Zellen, 52 125 Orte (davon 742 aus `admin_level=8`-Relationen), 7 891 PLZ.
 
@@ -90,8 +97,44 @@ Ohne Server sehen Suchmaschinen sonst nur die leere App-Hülle. Der Build erzeug
 
 ## Karte und Dienste (Bedingungen, Stand 2026-11-20)
 - **Kacheln: OpenFreeMap** (`src/provider.ts`, eine Datei). Kostenlos, ohne Schlüssel und ohne Registrierung; Attribution „OpenFreeMap © OpenMapTiles Data from OpenStreetMap“ + „© OpenStreetMap contributors“ liegt auf der Karte. Laut ToS: kein automatisiertes Absaugen, Offline-Downloads max. 3000 Kacheln/50 MB. Kann Cloudflare als CDN nutzen, ohne Garantie („as is“). **[prüfen]** Verlässlichkeit für „wie ein Uhrwerk“; Alternativen: PMTiles-Selbsthosting (siehe Doku von OpenFreeMap/Protomaps), MapTiler mit öffentlichem Schlüssel. Datenschutz s06 nennt OpenFreeMap (Hyperknot Software Kft.).
-- **Route in der App: nicht umgesetzt.** OSRM-Demo/routing.openstreetmap.de: „reasonable, non-commercial use, ≤ 1 request/s, no guarantees“, also kein Produktivdienst. Stattdessen Luftlinie + Deeplinks (Google Maps `maps/dir/?api=1`, Apple Karten, Android `geo:`).
-- **Bewertungen:** nur Link „Bewertungen in Google Maps“ (Suche nach Name+Adresse, ohne API/Schlüssel). **[prüfen]** ob das Linkformat stabil bleibt.
+- **Route in der App: umgesetzt (2026-11-26)**, ohne eigenen Server, ohne Schlüssel. Konfiguration NUR in `src/provider.ts` (`ROUTE_PROVIDERS`: URL, Name, Zeitlimit, Mindestabstand, Ein/Aus je Dienst), Logik in `src/routing.ts`, Ansicht `src/views/route.ts`, Linie auf der Karte `src/map.ts` (`setRouteLines`). Schalter beim Build: `VITE_ROUTE_TRANSIT=0` (ÖPNV aus), `VITE_ROUTE_ROAD=0` (Zu Fuß/Auto aus); die CSP (`connect-src`) wird aus derselben Datei erzeugt. Siehe nächster Abschnitt.
+- **Bewertungen:** nur der Knopf „Bewertungen in Google Maps“ mit einer kurzen Zeile (Suche nach Name+Adresse, ohne API/Schlüssel). **[prüfen]** ob das Linkformat stabil bleibt. Für spätere Google-Sterne ist `ratingSlot()`/`fillRatingSlot()` (`src/ui/components.ts`) vorbereitet: ein versteckter Platz `.rating-slot` über dem Knopf (Places API nur mit Schlüssel und Budgetgrenze, Attribution anzeigen, Inhalte nicht speichern).
+
+## Routen in der App (Dienste, Bedingungen, Grenzen)
+Auslöser sind ausschließlich Handlungen der Nutzenden: Tippen auf „Route“ (Einrichtungskarte oder Routen-Symbol in der Liste), Wechsel des Verkehrsmittels, „Frühere/Spätere Verbindungen“, „Route berechnen“. Beim Neuladen, Zurück/Vorwärts oder über einen Link zeigt die Ansicht nur die Schaltfläche „Route berechnen“ (geprüft: 0 Anfragen). Ergebnisse stehen nur im Arbeitsspeicher der Sitzung (Cache 20 min Straße / 3 min ÖPNV). Gesendet werden nur Start- und Zielkoordinaten (nie Name/Adresse der Einrichtung); einfache GET-Anfragen ohne eigene Header (kein Preflight), `credentials: omit`, Referer = Ursprung der App.
+
+| Verkehrsmittel | Dienst | Antwort | Zeit/Entfernung | Schritte |
+|---|---|---|---|---|
+| Zu Fuß, Auto | `routing.openstreetmap.de/routed-foot` bzw. `/routed-car` (OSRM v5.27, FOSSGIS e.V.) | GeoJSON-Linie | ja (Profil foot/car, ohne Verkehrslage) | ja (Abbiegehinweise, kompakt, de/en) |
+| ÖPNV | `api.transitous.org/api/v5/plan` (MOTIS 2, Transitous; Daten u. a. DELFI) | Verbindungen mit Linie, Richtung, Steig, Echtzeit-Kennzeichen, Umstiege, Fußwegen | ja | Verlauf je Verbindung; „Frühere/Spätere“ per Seitenzeiger |
+
+**Gemessen am 2026-11-26** (curl und Browser, Heilbronn): beide Dienste antworten mit `access-control-allow-origin: *` (CORS im Browser ohne Proxy nutzbar), Preflight `OPTIONS` auf Transitous mit 200. Antwort OSRM ca. 10 KB je Kurzstrecke, Transitous ca. 120 KB je Anfrage mit 3–4 Verbindungen.
+
+**Bedingungen (selbst gelesen, Stand 2026-11-26)**
+- *FOSSGIS e.V.* (fossgis.de/arbeitsgruppen/osm-server/nutzungsbedingungen, routing.openstreetmap.de): kostenlos, aber Ehrenamts-Dienst ohne Garantie; höchstens 1 Anfrage/s (in `provider.ts` mit 1,1 s Mindestabstand umgesetzt), kein Scraping/keine hohe Last, gültiger User-Agent bzw. Referer (Browser sendet ihn), Quellenangabe © OpenStreetMap + Link auf openstreetmap.org/fixthemap (steht in der Route-Ansicht), **eine E-Mail-Adresse des Betreibers muss auf der Website leicht erreichbar sein** (`CONTACT_EMAIL` in `src/config.ts` ist noch leer: **offen, Eigentümer**), „Webseiten mit hohem Traffic dürfen die Dienste grundsätzlich nicht nutzen“, kommerzielle Nutzung nur, wenn der Dienst kein wesentlicher Teil des Angebots ist (Routen sind hier ein Zusatz; Einordnung **[prüfen]**). URLs sollen nicht fest verdrahtet sein (nur `provider.ts`).
+- *Transitous* (transitous.org/api): Nutzung „best effort“, jederzeit sperrbar; erlaubt für Projekte, die **Open Source** und **nicht kommerziell** sind und die Richtlinie einhalten. Pflicht: Quellenlink https://transitous.org/sources/ sichtbar (Route-Ansicht und Datenquellen-Seite), Referer statt User-Agent im Browser plus Kontaktangabe auf der Website (Impressum), mehr als 720 `/plan`-Anfragen je 24 h vorher mit dem Betreiber abstimmen. **Offen [prüfen]: Das GitHub-Repository ist privat und nicht als Open Source lizenziert.** Solange das so bleibt (oder das Angebot kommerziell wird), ist der Transitous-Teil nicht gedeckt: `VITE_ROUTE_TRANSIT=0` beim Build schaltet ihn ab (die App zeigt dann Luftlinie und Google/Apple Karten).
+- *openrouteservice* wurde nicht eingebunden: es verlangt einen API-Schlüssel, und ein Schlüssel im Client ist öffentlich (Missbrauch/Kontingent).
+- Google/Apple Karten bleiben als Rückfall unter jedem Ergebnis und bei Fehlern.
+
+**Fehlerbehandlung:** Zeitlimit (12 s Straße, 15 s ÖPNV) → „antwortet nicht rechtzeitig“; HTTP 429 → „überlastet, in einer Minute erneut“; 5xx/Netz → eine Wiederholung nach 0,9 s, dann Meldung; „keine Route“; unerwartete Antwort. Jedes Mal: Luftlinie (auf dem Gerät berechnet) + Google/Apple-Knöpfe + „Erneut versuchen“. Getestet mit gespeicherten Fixtures und mit erzwungenem 429/Abbruch (QA-Skript).
+**Grenzen:** keine Verkehrslage; Fußweg-/Autozeiten sind Modellwerte; ÖPNV zeigt ab „jetzt“ (keine Zeitwahl); Start ist immer der Standort (kein freier Startpunkt); Straßennamen in den Schritten stammen aus OSM und werden nicht übersetzt.
+
+## Schublade, Verlauf, Start (Stand 2026-11-26)
+- **Zurück/Vorwärts:** `src/router.ts` legt in `history.state` einen Zähler (`gf`) und beim Verlassen von Karte/Liste einen Schnappschuss (Kartenausschnitt, Scrollposition, Schubladenstellung) ab; `app.ts` stellt ihn bei popstate wieder her (Suchergebnis aus `S.resCache`, ohne neue Berechnung; Filter stehen in der URL). Der sichtbare Knopf „Zurück“ (Liste, Einrichtung, Route, Fehler melden) geht per `history.back()`, ohne vorherigen App-Eintrag (Deep-Link) zur Ergebnisliste bzw. Karte.
+- **Schublade (iOS „hängt“):** Ursachen und Gegenmaßnahmen stehen im Kommentar über `initSheetDrag()` in `src/app.ts` (ganze Schublade statt nur 28-px-Griff als Ziehfläche, `overflow: clip` + Scroll-Rückfall für `.app`, Ende jeder Geste über pointerup/-cancel/lostpointercapture/touchend/-cancel/blur/visibilitychange/pagehide und 2,5-s-Wächter, `setSheet()` räumt Inline-Reste auf). Ohne echtes iPhone geprüft, siehe `../texts/site-qa-feedback1.md`.
+- **Filter:** alle Einrichtungs-Kategorien gewählt = „Alle“ (leere Auswahl, `normalizeFilters()` in `src/filters.ts`); Gastronomie gehört nicht zu „Alle“ (eigene Dateien).
+- **Erster Start:** eigene Frage „Standort verwenden?“ (`offerLocation()` in `app.ts`) vor der Systemabfrage; Wahl in `settings.geo` (`ask|yes|no`). Ist der Standort schon freigegeben, wird er still geholt und die Umgebung gezeigt.
+- **Suche ohne Ort:** Bezugspunkt = gezoomte Karte (Zoom ≥ 9) vor Standort vor grober Karte (`src/geo-ref.ts`), Umkreis höchstens 25 km (`NEAR_MAX_KM`). Ohne Treffer: „Keine Treffer … im Umkreis von 25 km“ + auf Wunsch „Nächste anzeigen (X km, Ort)“ (sucht 50/100/200 km, zeigt nie von selbst an); ohne Bezugspunkt die Frage „Wo soll gesucht werden?“.
+- **Karte „Datenquelle“ entfernt:** Quelle/Stand/Lizenz stehen auf `/datenquellen`, in der Attribution der Karte und (Fehler melden, Datenquellen) im Menü „⋯“ der Einrichtungskarte.
+
+## Tests und QA
+```bash
+npm test                                     # 12 Kernlogik-Tests + 12 Tests zu Routing/Filter/Suche (scripts/tests/feedback1.test.mjs, esbuild-Bündel)
+npx vite preview --port 4173 &               # nach npm run build
+node qa/feedback1.mjs http://localhost:4173 --shots ../texts/screens/qa2                    # Chromium (System-Chrome) 375/1440, echte Touch-Eingabe per CDP
+PLAYWRIGHT_BROWSERS_PATH=<ordner> node qa/feedback1.mjs http://localhost:4173 --engine webkit # WebKit mit iPhone-Profil (npx playwright-core install webkit)
+```
+Das QA-Skript ruft die echten Routing-Dienste auf (wenige Anfragen je Lauf); Fehlerpfade (429, Abbruch) werden per `page.route` simuliert (nur Chromium).
 
 ## Native Apps (Capacitor, nicht gebaut)
 `capacitor.config.ts` ist ein Entwurf. Schritte: `npm i @capacitor/core @capacitor/cli @capacitor/ios @capacitor/android`, Bundle-ID setzen, `npm run build`, `npx cap add ios android`, `npx cap sync`, dann Xcode/Android Studio. Für „App bewerten“ ein Plugin (z. B. `@capacitor-community/in-app-review`) an `window.GOVfindNative.rateApp` hängen (Hook in `views/pages.ts`). Standort-Texte in `Info.plist`/Manifest setzen. Apple-/Google-Entwicklerkonto und Datenschutz-/Impressum-URLs sind Aufgabe des Eigentümers.
@@ -100,6 +143,7 @@ Ohne Server sehen Suchmaschinen sonst nur die leere App-Hülle. Der Build erzeug
 GitHub Pages (Actions-Entwurf mit Matrix über 16 Länder + Merge: `.github/workflows/build-data.yml`, nicht in Actions getestet) oder Cloudflare Pages (`npm run build`, Ausgabe `dist`). `dist/404.html` ist SPA-Fallback. Nichts wurde veröffentlicht.
 
 ## Offen / [prüfen]
+- **Routen in der App:** Transitous setzt ein öffentliches Open-Source-Projekt ohne kommerzielle Nutzung voraus (Repo ist privat), FOSSGIS verlangt eine erreichbare Betreiber-E-Mail (`CONTACT_EMAIL`), beide Dienste ohne Garantie. Datenschutz s05/s07 nennen die Dienste; Betreiber/Anschrift/Serverstandort von Transitous **[prüfen]**; juristische Prüfung steht aus. Auf einem echten iPhone nicht geprüft.
 - **Impressum ist Platzhalter, Datenschutz ist Entwurf** (Platzhalter in eckigen Klammern sind sichtbar markiert). Nicht produktiv ohne juristische Prüfung und Eigentümerdaten. Kontakt-E-Mail: `src/config.ts` `CONTACT_EMAIL` (leer = kein Mail-Link).
 - Hoster (Logs, Datenschutz s03), Domain, Marke/Name. PVOG und Destatis nicht eingebunden (Lizenz/Zugang offen).
 - SEO: siehe Abschnitt „SEO und Vorab-Rendering“. Offen: `/stadt/<slug>/<kategorie>` nur für Behörden-Unterkategorien; Impressum/Datenschutz sind `noindex`, bis sie final sind.

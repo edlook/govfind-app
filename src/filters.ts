@@ -1,4 +1,4 @@
-import { GROUPS, SUBS, GROUP_OF } from '../shared/taxonomy.js';
+import { GROUPS, SUBS, GROUP_OF, isGastroSub } from '../shared/taxonomy.js';
 import type { Place } from './types';
 import { statusOf } from './hours';
 
@@ -27,6 +27,20 @@ export function serializeKat(subs: Set<string>): string {
   }
   return toks.join(',');
 }
+/** Radius-Stufen (km) für den Filter und für „Nächste anzeigen“ */
+export const RADIUS_OPTIONS = [1, 5, 10, 25, 50, 100, 200] as const;
+
+/** Alle Unterkategorien der Einrichtungen (ohne Gastronomie: die liegt in eigenen Dateien und gehört nicht zu „Alle“) */
+const CORE_SUBS = SUBS.filter((s) => !isGastroSub(s.slug)).map((s) => s.slug);
+/** Auswahl = alle Einrichtungs-Kategorien (und keine Gastronomie) bedeutet „keine Einschränkung“. */
+export const isAllCategories = (subs: Set<string>): boolean => subs.size === 0 || (CORE_SUBS.every((s) => subs.has(s)) && ![...subs].some(isGastroSub));
+/** „Alle ausgewählt“ ist dasselbe wie „Alle“ (leere Menge): Ergebnisse, Karte, Zähler und URL verhalten sich gleich. */
+export function normalizeFilters(f: Filters): Filters {
+  return isAllCategories(f.subs) && f.subs.size ? { ...f, subs: new Set() } : f;
+}
+/** Enthält die Auswahl Gastronomie? Dann müssen die Gastro-Dateien geladen werden. */
+export const wantsGastro = (subs: Set<string>): boolean => [...subs].some(isGastroSub);
+
 export const activeFilterCount = (f: Filters): number => (f.subs.size ? 1 : 0) + +f.withHours + +f.openNow + +f.wheelchair + (f.radius !== 'auto' ? 1 : 0);
 
 export function matches(p: Place, f: Filters, now: Date): boolean {

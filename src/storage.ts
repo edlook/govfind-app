@@ -16,8 +16,9 @@ function write(key: string, value: unknown): boolean {
 }
 
 // ---- Einstellungen ----
-export interface Settings { lang: string; theme: 'system' | 'light' | 'dark'; units: 'km' | 'mi'; motion: 'system' | 'on' }
-const DEFAULTS: Settings = { lang: 'system', theme: 'system', units: 'km', motion: 'system' };
+/** geo: Wahl bei der ersten Standort-Abfrage (ask = noch nicht gefragt, yes = zugestimmt, no = abgelehnt) */
+export interface Settings { lang: string; theme: 'system' | 'light' | 'dark'; units: 'km' | 'mi'; motion: 'system' | 'on'; geo: 'ask' | 'yes' | 'no' }
+const DEFAULTS: Settings = { lang: 'system', theme: 'system', units: 'km', motion: 'system', geo: 'ask' };
 let settings: Settings = { ...DEFAULTS, ...read<Partial<Settings>>('gf.settings', {}) };
 export const getSettings = (): Settings => settings;
 export function setSettings(p: Partial<Settings>): void { settings = { ...settings, ...p }; write('gf.settings', settings); }

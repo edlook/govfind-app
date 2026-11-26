@@ -1,6 +1,7 @@
 import { A } from '../ctx';
 import { allRegionNames } from '../app-data';
 import { CONTACT_EMAIL, TILE_PROVIDER } from '../config';
+import { ROUTE_PROVIDERS } from '../provider';
 import { getLang, fmtDate, has, t } from '../i18n';
 import { loadMeta } from '../data';
 import { canInstall, install, onInstallChange } from '../pwa';
@@ -89,7 +90,11 @@ export function renderSources(host: HTMLElement): void {
           row([h('span', null, t('sources.table.osm.name'), h('br'), h('span', { class: 'meta' }, t('sources.table.osm.attribution'))), t('sources.table.osm.content'),
             h('span', null, t('sources.table.osm.license'), h('br'), h('a', { href: 'https://www.openstreetmap.org/copyright', target: '_blank', rel: 'noopener noreferrer' }, t('sources.table.osm.link')))]),
           row([TILE_PROVIDER.name, t('sources.table.tiles.content'),
-            h('span', null, `© OpenMapTiles, © OpenStreetMap contributors. `, h('a', { href: 'https://openfreemap.org/tos/', target: '_blank', rel: 'noopener noreferrer' }, 'openfreemap.org/tos'))]))))),
+            h('span', null, `© OpenMapTiles, © OpenStreetMap contributors. `, h('a', { href: 'https://openfreemap.org/tos/', target: '_blank', rel: 'noopener noreferrer' }, 'openfreemap.org/tos'))]),
+          ...(ROUTE_PROVIDERS.walk.enabled ? [row([t('sources.table.route_road.name'), t('sources.table.route_road.content'),
+            h('span', null, t('sources.table.route_road.license'), ' ', h('a', { href: ROUTE_PROVIDERS.walk.termsUrl, target: '_blank', rel: 'noopener noreferrer' }, 'fossgis.de'))])] : []),
+          ...(ROUTE_PROVIDERS.transit.enabled ? [row([t('sources.table.route_transit.name'), t('sources.table.route_transit.content'),
+            h('span', null, t('sources.table.route_transit.license'), ' ', h('a', { href: ROUTE_PROVIDERS.transit.sourcesUrl, target: '_blank', rel: 'noopener noreferrer' }, 'transitous.org/sources'))])] : []))))),
     h('section', { class: 'sec' }, h('h2', null, t('sources.build.title')), h('p', null, t('sources.build.body'))),
     dyn,
     h('section', { class: 'sec' }, h('h2', null, t('sources.how.title')),

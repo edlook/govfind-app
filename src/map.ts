@@ -11,6 +11,7 @@ import type { LatLng, Place } from './types';
 setWorkerUrl(workerUrl);
 
 export type Bounds = [number, number, number, number];
+export interface RouteLine { coords: [number, number][]; kind: 'walk' | 'road' | 'transit'; color?: string }
 export interface MapEvents {
   onSelect: (id: string, cell: string) => void;
   onMoved: (info: { center: LatLng; zoom: number; bounds: Bounds; user: boolean }) => void;
@@ -25,7 +26,9 @@ function markerSvg(key: string): string {
   const gc = glyphColorOn(color);
   const body = shape === 'square'
     ? '<path d="M9 3h22a5 5 0 0 1 5 5v22a5 5 0 0 1-5 5h-8l-3 6-3-6H9a5 5 0 0 1-5-5V8a5 5 0 0 1 5-5z"/>'
-    : '<path d="M20 47C20 47 4 31 4 19a16 16 0 0 1 32 0c0 12-16 28-16 28z"/>';
+    : shape === 'hex'
+      ? '<path d="M20 2.500 34.500 10.500v17L24 33.500 20 45l-4-11.500L5.500 27.500v-17z"/>'
+      : '<path d="M20 47C20 47 4 31 4 19a16 16 0 0 1 32 0c0 12-16 28-16 28z"/>';
   return `<svg xmlns="http://www.w3.org/2000/svg" width="80" height="96" viewBox="0 0 40 48"><g fill="${color}" stroke="#ffffff" stroke-width="2.2" stroke-linejoin="round">${body}</g><g transform="translate(9.5 8.5) scale(.85)" fill="none" stroke="${gc}" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="${iconPath(glyph)}"/></g></svg>`;
 }
 async function svgImage(svg: string): Promise<HTMLImageElement> {
@@ -88,7 +91,10 @@ export class MapController {
     m.addSource('hover', { type: 'geojson', data: empty as never });
     m.addSource('me', { type: 'geojson', data: empty as never });
     m.addSource('route', { type: 'geojson', data: empty as never });
-    m.addLayer({ id: 'route-line', type: 'line', source: 'route', paint: { 'line-color': accent, 'line-width': 3, 'line-dasharray': [2, 2] } });
+    // Routenlinie: Umriss (hell) + Linie; Fußwege gestrichelt (kind=walk), Straße/ÖPNV durchgezogen (Farbe der Linie, sonst Akzent)
+    m.addLayer({ id: 'route-casing', type: 'line', source: 'route', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#ffffff', 'line-width': 8, 'line-opacity': 0.9 } });
+    m.addLayer({ id: 'route-line', type: 'line', source: 'route', filter: ['!=', ['get', 'kind'], 'walk'], layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': ['coalesce', ['get', 'color'], accent], 'line-width': 5 } });
+    m.addLayer({ id: 'route-walk', type: 'line', source: 'route', filter: ['==', ['get', 'kind'], 'walk'], layout: { 'line-join': 'round' }, paint: { 'line-color': '#334155', 'line-width': 4, 'line-dasharray': [1, 1.6] } });
     m.addLayer({ id: 'clusters', type: 'circle', source: 'places', filter: ['has', 'point_count'], paint: { 'circle-color': accent, 'circle-radius': ['step', ['get', 'point_count'], 17, 20, 21, 100, 26, 500, 31], 'circle-stroke-width': 2.5, 'circle-stroke-color': '#ffffff' } });
     m.addLayer({ id: 'cluster-count', type: 'symbol', source: 'places', filter: ['has', 'point_count'], layout: { 'text-field': ['get', 'point_count_abbreviated'], 'text-font': ['Noto Sans Bold'], 'text-size': 13, 'text-allow-overlap': true }, paint: { 'text-color': onAccent } });
     m.addLayer({ id: 'points', type: 'symbol', source: 'places', filter: ['!', ['has', 'point_count']], layout: { 'icon-image': ['concat', 'pin-', ['get', 'ic']], 'icon-anchor': 'bottom', 'icon-size': 0.62, 'icon-allow-overlap': true, 'icon-padding': 0 } });
@@ -113,10 +119,10 @@ export class MapController {
     // gemerkte Zustände nach Stilwechsel wiederherstellen
     if (this.lastSel) this.setSelected(this.lastSel);
     if (this.lastMe) this.setUser(this.lastMe);
-    if (this.lastRoute) this.setRoute(this.lastRoute[0], this.lastRoute[1]);
+    if (this.lastLines) this.setRouteLines(this.lastLines);
   }
 
-  private lastSel: Place | null = null; private lastMe: LatLng | null = null; private lastRoute: [LatLng, LatLng] | null = null;
+  private lastSel: Place | null = null; private lastMe: LatLng | null = null; private lastLines: RouteLine[] | null = null;
 
   private fc(list: Place[]): FC {
     return { type: 'FeatureCollection', features: list.map((p) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [p.ln, p.la] }, properties: { id: p.id, ic: markerKey(p.s), cell: placeCell(p) } })) };
@@ -135,10 +141,27 @@ export class MapController {
     this.lastMe = l;
     (this.map.getSource('me') as GeoJSONSource | undefined)?.setData((l ? { type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'Point', coordinates: [l.lng, l.lat] }, properties: {} }] } : empty) as never);
   }
+  /** Luftlinie (Rückfall ohne berechnete Route): gestrichelte Gerade */
   setRoute(a: LatLng | null, b: LatLng | null): void {
-    this.lastRoute = a && b ? [a, b] : null;
-    (this.map.getSource('route') as GeoJSONSource | undefined)?.setData((a && b ? { type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'LineString', coordinates: [[a.lng, a.lat], [b.lng, b.lat]] }, properties: {} }] } : empty) as never);
+    this.setRouteLines(a && b ? [{ coords: [[a.lng, a.lat], [b.lng, b.lat]], kind: 'walk' }] : null);
   }
+  /** Berechnete Route: mehrere Abschnitte (Fußweg gestrichelt, Straße/ÖPNV durchgezogen, optional Linienfarbe) */
+  setRouteLines(lines: RouteLine[] | null): void {
+    this.lastLines = lines && lines.length ? lines : null;
+    (this.map.getSource('route') as GeoJSONSource | undefined)?.setData((lines && lines.length
+      ? { type: 'FeatureCollection', features: lines.filter((l) => l.coords.length > 1).map((l) => ({ type: 'Feature', geometry: { type: 'LineString', coordinates: l.coords }, properties: { kind: l.kind, ...(l.color ? { color: l.color } : {}) } })) }
+      : empty) as never);
+  }
+  /** Punkte so einpassen, dass sie über der Schublade (padBottom) sichtbar sind */
+  fitCoords(coords: [number, number][], padBottom = 0): void {
+    if (!coords.length) return;
+    let w = 180, s = 90, e = -180, n = -90;
+    for (const [x, y] of coords) { w = Math.min(w, x); e = Math.max(e, x); s = Math.min(s, y); n = Math.max(n, y); }
+    if (e - w < 0.0005 && n - s < 0.0005) { this.flyTo({ lat: s, lng: w }, 16, padBottom); return; }
+    this.map.fitBounds([[w, s], [e, n]], { padding: { top: 120, bottom: padBottom + 24, left: 40, right: 40 }, maxZoom: 17, duration: this.reduce ? 0 : 600 });
+  }
+  /** Kartenausschnitt sofort setzen (Zurück: gespeicherten Ausschnitt wiederherstellen) */
+  jumpTo(c: LatLng, zoom: number): void { this.map.jumpTo({ center: [c.lng, c.lat], zoom, padding: { top: 0, bottom: 0, left: 0, right: 0 } }); }
   flyTo(c: LatLng, zoom: number, padBottom = 0): void {
     const o = { center: [c.lng, c.lat] as [number, number], zoom, padding: { top: 80, bottom: padBottom, left: 0, right: 0 } };
     if (this.reduce) this.map.jumpTo(o); else this.map.flyTo({ ...o, duration: 700, essential: false });

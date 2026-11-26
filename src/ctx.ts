@@ -23,6 +23,8 @@ export const S = {
   sort: 'auto' as 'auto' | 'name',
   map: null as MapController | null,
   mapOk: true,
+  /** Zuletzt berechnetes Suchergebnis samt Eingabe (Zurück aus der Einrichtung: ohne erneute Suche anzeigen) */
+  resCache: null as { key: string; res: SearchOutput } | null,
 };
 
 const subs = new Map<Topic, Set<() => void>>();
@@ -50,5 +52,9 @@ export interface Actions {
   retry(): void;
   searchHref(): string;
   applyTheme(): void;
+  /** Ein Schritt zurück (History) bzw. Ersatzpfad, wenn kein App-Eintrag davor liegt */
+  back(fallback: string): void;
+  /** Linie/Punkte in den sichtbaren Kartenteil einpassen (über der Schublade) */
+  fitCoords(coords: [number, number][]): void;
 }
 export const A = {} as Actions;

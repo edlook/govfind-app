@@ -21,6 +21,7 @@ export function distanceText(km: number): string {
   return new Intl.NumberFormat(getLang(), opts).format(small ? Math.max(mi ? 50 : 10, Math.round(val / (mi ? 50 : 10)) * (mi ? 50 : 10)) : val);
 }
 
+export const placeCellOf = (p: Place): string => placeCell(p);
 export const placeHref = (p: Place): string => href(`/einrichtung/${p.id}-${slugify(p.nm)}?c=${placeCell(p)}`);
 export const subLabel = (slug: string): string => t(`categories.sub.${slug}`);
 export const groupLabel = (g: string): string => t(`categories.group.${g}`);
@@ -68,10 +69,27 @@ export function skeletonRows(n = 6): HTMLElement {
   return h('ul', { class: 'skel', 'aria-hidden': 'true' }, Array.from({ length: n }, () => h('li', null, h('span', { class: 'sk sk-badge' }), h('span', { class: 'sk-lines' }, h('span', { class: 'sk sk-l1' }), h('span', { class: 'sk sk-l2' })))));
 }
 
+/** Sichtbare „Zurück“-Schaltfläche (Symbol + Text) */
+export function backButton(onClick: () => void, label = t('common.action.back')): HTMLButtonElement {
+  return h('button', { class: 'back-btn', type: 'button', onclick: onClick }, icon('back', { size: 20 }), h('span', null, label));
+}
+
 export function pageHeader(title: string, onBack?: () => void): HTMLElement {
   return h('div', { class: 'page-head' },
-    onBack ? h('button', { class: 'icon-btn', type: 'button', 'aria-label': t('common.action.back'), onclick: onBack }, icon('back')) : null,
+    onBack ? backButton(onBack) : null,
     h('h1', null, title));
+}
+
+/** Platz für Sterne aus Google Places (später, nur mit Schlüssel und Budgetgrenze). Bis dahin leer und unsichtbar. */
+export function ratingSlot(): HTMLElement {
+  return h('div', { class: 'rating-slot', 'data-rating-slot': '', hidden: true });
+}
+/** Füllt den Platz mit Sternen (Aufruf erst, wenn Daten vorliegen; Google verlangt Attribution, Inhalte nicht speichern) */
+export function fillRatingSlot(slot: HTMLElement, v: { value: number; count?: number; attribution: string }): void {
+  const stars = '★★★★★'.slice(0, Math.round(v.value)) + '☆☆☆☆☆'.slice(0, 5 - Math.round(v.value));
+  slot.replaceChildren(h('span', { class: 'stars', 'aria-hidden': 'true' }, stars), h('span', null, ` ${v.value.toFixed(1)}${v.count ? ` (${v.count})` : ''}`), h('span', { class: 'meta' }, ` ${v.attribution}`));
+  slot.setAttribute('role', 'img'); slot.setAttribute('aria-label', `${v.value.toFixed(1)} / 5`);
+  slot.hidden = false;
 }
 
 // ---- Mini-Markdown (Absätze, - Listen, **fett**, [Text](http-URL)); Platzhalter in [..] markiert; nie innerHTML ----

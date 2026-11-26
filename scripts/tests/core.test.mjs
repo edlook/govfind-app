@@ -92,3 +92,20 @@ test('Schulart: school:de, isced:level (inkl. "2A", "2-3", ISCED-2011), grades, 
   assert.equal(sub({ name: 'Paul-Klee-Schule' }), 'schule_sonstige');
   assert.equal(classify({ amenity: 'college', name: 'DEKRA Akademie GmbH' }).sub, 'schule_sonstige');
 });
+
+test('Gastronomie: classify + toPlace (nur OSM-Felder, Rest fehlt)', async () => {
+  const { isGastroSub, GROUPS } = await import('../../shared/taxonomy.js');
+  const { cuisineList } = await import('../build-data.mjs');
+  assert.equal(GROUPS.length, 9);
+  for (const [am, sub] of Object.entries({ restaurant: 'restaurant', cafe: 'cafe', fast_food: 'imbiss', bar: 'bar', pub: 'kneipe', biergarten: 'biergarten', ice_cream: 'eisdiele', food_court: 'food_court' }))
+    assert.equal(classify({ name: 'X', amenity: am }).sub, sub);
+  assert.equal(classify({ amenity: 'cafe' }), null); // ohne Namen nicht
+  assert.equal(classify({ name: 'Alt', amenity: 'cafe', 'disused:amenity': 'cafe' }), null);
+  assert.equal(classify({ name: 'Y', amenity: 'constructor' }), null);
+  assert.ok(isGastroSub('cafe') && !isGastroSub('polizei'));
+  assert.deepEqual(cuisineList('Italian; pizza;regional;greek;x'), ['italian', 'pizza', 'regional']);
+  const p = toPlace({ type: 'node', id: 9, lat: 49.14, lon: 9.22, tags: { name: 'Zum Löwen', amenity: 'restaurant', cuisine: 'german;regional', 'diet:vegetarian': 'yes', 'diet:vegan': 'limited', outdoor_seating: 'yes', wheelchair: 'limited', phone: '+49 7131 1', opening_hours: 'Mo-Su 11:00-22:00', operator: 'Egal' } }, { id: 'baden-wuerttemberg', state: 'BW' });
+  assert.equal(p.s, 'restaurant'); assert.deepEqual(p.cu, ['german', 'regional']); assert.equal(p.vg, 'yes'); assert.equal(p.vn, 'limited'); assert.equal(p.os, true); assert.equal(p.wc, 'limited'); assert.equal(p.op, undefined);
+  const q = toPlace({ type: 'node', id: 10, lat: 49.14, lon: 9.22, tags: { name: 'Café Y', amenity: 'cafe' } }, { id: 'bayern', state: 'BY' });
+  assert.ok(!('cu' in q) && !('vg' in q) && !('os' in q) && !('wc' in q)); // fehlt in OSM -> kein Feld ("Keine Angabe")
+});

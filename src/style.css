@@ -88,7 +88,7 @@ noscript p { padding: 24px; }
 .icon { flex: none; }
 
 /* ---------- Shell ---------- */
-.app { position: fixed; inset: 0; height: 100dvh; overflow: hidden; background: var(--bg); }
+.app { position: fixed; inset: 0; overflow: hidden; overflow: clip; background: var(--bg); } /* clip: kein Scroll-Container, die verschobene Schublade (liegt teils außerhalb) kann die App nie per focus()/scrollIntoView() verrücken */
 .app .map { position: absolute; inset: 0; }
 [hidden] { display: none !important; }
 .topbar { position: absolute; top: 0; left: 0; right: 0; z-index: 20; display: flex; align-items: center; gap: 8px; padding: calc(8px + env(safe-area-inset-top)) calc(12px + env(safe-area-inset-right)) 8px calc(12px + env(safe-area-inset-left)); pointer-events: none; }
@@ -115,6 +115,7 @@ noscript p { padding: 24px; }
 .banners .banner { pointer-events: auto; box-shadow: var(--shadow); }
 
 /* Bottom Sheet (Mobil) */
+.panel.dragging { will-change: transform; user-select: none; -webkit-user-select: none; }
 .panel { position: absolute; left: 0; right: 0; bottom: calc(var(--nav-h) + env(safe-area-inset-bottom)); height: calc(100dvh - var(--nav-h) - env(safe-area-inset-bottom) - var(--top-reserve)); z-index: 30; background: var(--bg2); border-radius: var(--radius-l) var(--radius-l) 0 0; box-shadow: 0 -6px 24px rgba(0, 0, 0, 0.3); display: flex; flex-direction: column; transform: translateY(var(--y, 0)); transition: transform 0.25s var(--ease); will-change: transform; border: 1px solid var(--border); border-bottom: 0; }
 .app[data-sheet='peek'] .panel { --y: calc(100% - var(--peek-h)); }
 .app[data-sheet='half'] .panel { --y: calc(100% - 46dvh); }
@@ -122,7 +123,7 @@ noscript p { padding: 24px; }
 /* Mobil: der verschobene Teil der Schublade liegt unter der Tab-Leiste; Scroll-Ende muss über der Leiste landen (sonst sind die letzten Einträge unerreichbar) */
 .app[data-sheet='peek'] .panel-body { padding-bottom: calc(24px + var(--panel-h) - var(--peek-h)); }
 .app[data-sheet='half'] .panel-body { padding-bottom: calc(24px + var(--panel-h) - 46dvh); }
-.sheet-handle { position: relative; flex: none; height: 28px; width: 100%; background: none; border: 0; display: grid; place-items: center; touch-action: none; cursor: grab; }
+.sheet-handle { position: relative; flex: none; height: 32px; width: 100%; background: none; border: 0; display: grid; place-items: center; touch-action: none; cursor: grab; }
 .sheet-handle::after { content: ''; position: absolute; inset: -8px 0; } /* Tippfläche 44 px, ohne das Layout zu verändern */
 .sheet-handle .bar { width: 40px; height: 5px; border-radius: 3px; background: var(--text3); }
 .panel-body { flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 0 16px calc(24px + env(safe-area-inset-bottom)); scroll-padding: 16px 0 96px; outline: none; -webkit-overflow-scrolling: touch; }
@@ -268,6 +269,10 @@ details > summary { cursor: pointer; }
 
 /* ---------- Mobil: Feintuning ---------- */
 @media (max-width: 767px) {
+  /* In „peek“ und „half“ ist die ganze Schublade die Ziehfläche (Inhalt scrollt erst in „full“); in „full“ nur der Griff */
+  .app[data-sheet='peek'] .panel, .app[data-sheet='half'] .panel { touch-action: none; }
+  .app[data-sheet='full'] .sheet-handle { touch-action: none; }
+  .app[data-sheet='half'] .panel-body { overflow: hidden; }
   .search-form.sf-overlay .submit { position: sticky; bottom: 0; }
   .field { grid-template-columns: 104px 1fr; }
 }
@@ -334,3 +339,41 @@ details > summary { cursor: pointer; }
 h1, h2 { letter-spacing: -0.01em; }
 .inline-search { max-width: 760px !important; }
 .addr { font-size: 1.0625rem; margin: 0 0 4px; }
+
+/* ---------- Zurück, Menü, Bewertungen, Route, Onboarding ---------- */
+.back-btn { min-height: var(--tap); padding: 0 12px 0 6px; display: inline-flex; align-items: center; gap: 2px; background: none; border: 0; color: var(--accent); font-weight: 700; border-radius: var(--radius-m); flex: none; }
+.back-btn:active { transform: scale(0.96); }
+.list-head > .back-btn { grid-column: 1 / -1; justify-self: start; margin-left: -6px; }
+.page-head .back-btn + h1 { padding-left: 4px; }
+.menu-wrap { position: relative; }
+.menu-list { position: absolute; right: 0; top: 100%; z-index: 20; list-style: none; margin: 4px 0 0; padding: 6px; min-width: 220px; background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius-m); box-shadow: var(--shadow); }
+.menu-list a { display: flex; align-items: center; gap: 10px; min-height: var(--tap); padding: 0 12px; color: var(--text); text-decoration: none; font-weight: 600; border-radius: var(--radius-s); }
+.menu-list a:hover, .menu-list a:focus-visible { background: var(--bg3); }
+.rating-slot { display: flex; align-items: center; gap: 6px; margin: 0 0 8px; font-weight: 600; }
+.rating-slot .stars { color: var(--warn); letter-spacing: 1px; }
+.meta.small { font-size: 0.75rem; margin: 6px 0 0; }
+.block { display: block; }
+.route-sum { font-size: 1.5rem; margin: 8px 0 2px; } .route-sum strong { font-weight: 800; }
+.route-sub { font-size: 1rem; margin: 12px 0 6px; }
+.steps { margin: 8px 0; } .steps summary { min-height: var(--tap); display: flex; align-items: center; font-weight: 600; cursor: pointer; }
+.step-list { margin: 0; padding-left: 22px; } .step-list li { padding: 6px 0; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; gap: 12px; }
+.step-dist { white-space: nowrap; }
+.itins { display: flex; flex-direction: column; gap: 8px; margin: 8px 0; }
+.itin { border: 1px solid var(--border); border-radius: var(--radius-m); background: var(--bg3); }
+.itin.sel { border-color: var(--accent); outline: 1px solid var(--accent); }
+.itin-top { width: 100%; display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; padding: 10px 12px; text-align: left; background: none; border: 0; color: inherit; min-height: var(--tap); }
+.itin-times { font-weight: 800; font-size: 1.0625rem; }
+.itin-dur { color: var(--text2); font-size: 0.875rem; text-align: right; }
+.itin-lines { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; }
+.line-chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 6px; background: var(--bg2); border: 1px solid var(--border); font-weight: 800; font-size: 0.8125rem; flex: none; }
+.legs { list-style: none; margin: 0; padding: 0 12px 10px; }
+.leg { display: flex; gap: 10px; padding: 8px 0; border-top: 1px solid var(--border); align-items: flex-start; }
+.leg-walk { color: var(--text2); align-items: center; font-size: 0.9375rem; }
+.leg-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.onboarding .modal-card { text-align: center; }
+.ob-icon { width: 56px; height: 56px; border-radius: 16px; margin: 0 auto 8px; display: grid; place-items: center; background: var(--accent); color: var(--on-accent); }
+.onboarding .stack { margin-bottom: 0; }
+/* Filterdialog: Gruppe = Kontrollkästchen links, Auf-/Zuklappen rechts (eine Zeile) */
+.fgroup-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.fgroup-head .check { flex: 1; min-width: 0; }
+.fgroup .subs { padding-left: 34px; }

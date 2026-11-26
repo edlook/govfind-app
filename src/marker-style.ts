@@ -11,10 +11,10 @@ export function markerKey(sub: string): string {
   const g = GROUP_OF[sub] ?? 'behoerden';
   return ['polizei', 'feuerwehr', 'rettungsdienst', 'post', 'bahnhof', 'verkehrsbetriebe'].includes(sub) ? sub : g;
 }
-export function markerStyle(key: string): { color: string; glyph: string; shape: 'pin' | 'square' } {
+export function markerStyle(key: string): { color: string; glyph: string; shape: 'pin' | 'square' | 'hex' } {
   const sub = SUB_BY_SLUG[key];
   const g = GROUP_BY_SLUG[key] ?? GROUP_BY_SLUG[sub?.group ?? 'behoerden']!;
-  return { color: SUB_COLOR[key as keyof typeof SUB_COLOR] ?? g.color, glyph: sub?.glyph ?? g.glyph, shape: g.shape as 'pin' | 'square' };
+  return { color: SUB_COLOR[key as keyof typeof SUB_COLOR] ?? g.color, glyph: sub?.glyph ?? g.glyph, shape: g.shape as 'pin' | 'square' | 'hex' };
 }
 /** Farbe der Kategorie (für Listen-Icons) */
 export const colorOfSub = (sub: string): string => markerStyle(markerKey(sub)).color;

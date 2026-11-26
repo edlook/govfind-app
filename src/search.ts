@@ -1,10 +1,11 @@
 // Lokale Suche auf dem Gerät: "Was?" (Art/Name) getrennt von "Wo?" (Ort/PLZ). Kein Geocoder, kein Server.
-import { SUBS, GROUP_OF, norm } from '../shared/taxonomy.js';
-import { AUTO_MIN_RESULTS, AUTO_RADIUS_STEPS_KM, MAX_RESULTS } from './config';
-import { allLoadedCells, bboxForCircle, cellCenter, cellsForBbox, distanceKm, getLoadedCell, loadCells, loadGazetteer, loadIndex } from './data';
-import { type Filters, matches } from './filters';
+import { SUBS, GROUP_OF, isGastroSub, norm } from '../shared/taxonomy.js';
+import { AUTO_MIN_RESULTS, AUTO_RADIUS_STEPS_KM, MAX_RESULTS, NEAR_MAX_KM, NEAREST_STEPS_KM } from './config';
+import { allLoadedCells, bboxForCircle, cellCenter, cellsForBbox, distanceKm, gastroCellsForBbox, getLoadedCell, loadCells, loadGazetteer, loadIndex } from './data';
+import { type Filters, matches, wantsGastro } from './filters';
 import { loadHours } from './hours';
 import { getLang, t } from './i18n';
+import { pickReference } from './geo-ref';
 import type { DataIndex, Gazetteer, LatLng, Place, PlaceRow } from './types';
 import de from './locales/de.json';
 
@@ -24,6 +25,13 @@ const FAMILIES: { subs: string[]; terms: string[] }[] = [
   { subs: ['amtsgericht', 'landgericht', 'verwaltungsgericht', 'gericht_sonstige', 'staatsanwaltschaft'], terms: ['gericht', 'court', 'justiz'] },
   { subs: ['polizei'], terms: ['polizei', 'police', 'wache'] },
   { subs: ['apotheke'], terms: ['apotheke', 'pharmacy', 'chemist'] },
+  // Gastronomie (eigene Datei-Familie, wird nur bei passender Suche bzw. Auswahl geladen)
+  { subs: ['restaurant', 'imbiss', 'food_court'], terms: ['restaurant', 'restaurants', 'gaststaette', 'gasthaus', 'gasthof', 'essen', 'lokal', 'food'] },
+  { subs: ['cafe'], terms: ['cafe', 'kaffee', 'coffee', 'cafeteria'] },
+  { subs: ['bar', 'kneipe'], terms: ['bar', 'kneipe', 'pub', 'cocktailbar'] },
+  { subs: ['biergarten'], terms: ['biergarten', 'beer garden'] },
+  { subs: ['eisdiele'], terms: ['eis', 'eisdiele', 'eiscafe', 'ice cream'] },
+  { subs: ['imbiss'], terms: ['imbiss', 'schnellimbiss', 'fast food', 'doener', 'currywurst'] },
 ];
 
 const subForms = (slug: string): string[] => {
@@ -205,14 +213,18 @@ export function suggestWas(text: string, limit = 8): WasSuggestion[] {
 
 // ---------- Suche ----------
 export interface SearchInput {
-  was: string; wo: string; nearby: boolean; filters: Filters; userLoc: LatLng | null; mapCenter: LatLng;
+  was: string; wo: string; nearby: boolean; filters: Filters; userLoc: LatLng | null;
+  /** aktueller Kartenausschnitt (null = unbekannt); Mitte dient bei „Was?“ ohne Ort als Bezugspunkt, wenn hinein gezoomt wurde */
+  mapView: { center: LatLng; zoom: number } | null;
 }
 export interface ResultItem { p: Place; d: number | null }
 export interface SearchOutput {
-  kind: 'ok' | 'wo_not_found';
+  kind: 'ok' | 'wo_not_found' | 'need_where';
   items: ResultItem[]; total: number; truncated: boolean; failedCells: number;
   radiusKm: number | null; center: LatLng | null; regionId: string | null; label: string | null; ref: LatLng | null;
   suggestion: string | null; woNoData: boolean; similar: string[]; wasSubs: string[]; woText: string; woAlts: WoAlt[];
+  /** zuletzt abgesuchter Umkreis (km), Art des Bezugspunkts und – bei leerem Ergebnis – das nächste Objekt außerhalb */
+  searchedKm: number | null; refSrc: 'user' | 'map' | null; nearest: { p: Place; d: number } | null;
 }
 
 function baseRadius(r: PlaceRow): number {
@@ -230,11 +242,16 @@ export async function runSearch(inp: SearchInput): Promise<SearchOutput> {
   const wasSubs = new Set([...wm.direct, ...wm.similar]);
   const wasN = norm(was);
   const keepWas = (p: Place): boolean => !wasN || ((wasSubs.has(p.s) || nameNorm(p).includes(wasN)) && relevanceTier(p, wasN, wasSubs, wm.direct) < 2);
-  const base: SearchOutput = { kind: 'ok', items: [], total: 0, truncated: false, failedCells: 0, radiusKm: null, center: null, regionId: null, label: null, ref: inp.userLoc, suggestion: null, woNoData: false, similar: [...wm.similar].filter((s) => !wm.direct.has(s)), wasSubs: [...wasSubs], woText: inp.wo, woAlts: [] };
+  const base: SearchOutput = { kind: 'ok', items: [], total: 0, truncated: false, failedCells: 0, radiusKm: null, center: null, regionId: null, label: null, ref: inp.userLoc, suggestion: null, woNoData: false, similar: [...wm.similar].filter((s) => !wm.direct.has(s)), wasSubs: [...wasSubs], woText: inp.wo, woAlts: [], searchedKm: null, refSrc: null, nearest: null };
+  // Gastronomie liegt in eigenen Dateien: nur laden, wenn sie gewählt ist oder die Suche sie meint (z. B. „Restaurant“)
+  const useGastro = wantsGastro(inp.filters.subs) || [...wasSubs].some(isGastroSub);
+  const onlyGastro = inp.filters.subs.size > 0 && [...inp.filters.subs].every(isGastroSub);
+  const cellsFor = async (bbox: [number, number, number, number]): Promise<string[]> => [...(onlyGastro ? [] : cellsForBbox(idx, bbox)), ...(useGastro ? await gastroCellsForBbox(bbox) : [])];
 
   let center: LatLng | null = null; let region: string | null = null; let startR = 1; let label: string | null = null; let fixedR: number | null = null;
+  let maxR = 50; let refSrc: 'user' | 'map' | null = null;
   const wo = inp.wo.trim();
-  if (inp.nearby && inp.userLoc) { center = inp.userLoc; startR = 1; }
+  if (inp.nearby && inp.userLoc) { center = inp.userLoc; startR = 1; refSrc = 'user'; }
   else if (wo) {
     const r = resolveWo(await loadGazetteer(), wo);
     if (r.kind === 'none') return { ...base, kind: 'wo_not_found', suggestion: r.suggestion };
@@ -245,6 +262,12 @@ export async function runSearch(inp: SearchInput): Promise<SearchOutput> {
       if (reg) region = reg.id; else startR = baseRadius(r.row);
     }
   }
+  else {
+    // „Was?“ ohne Ort: Umgebung der Nutzenden bzw. Mitte der (hineingezoomten) Karte, nie ein beliebiger Ort in Deutschland
+    const ref = pickReference(inp);
+    if (!ref) return { ...base, kind: 'need_where' };
+    center = ref.c; refSrc = ref.src; startR = 1; maxR = NEAR_MAX_KM;
+  }
   if (typeof inp.filters.radius === 'number') fixedR = inp.filters.radius;
 
   const passes = (p: Place): boolean => keepWas(p) && matches(p, inp.filters, now);
@@ -252,25 +275,31 @@ export async function runSearch(inp: SearchInput): Promise<SearchOutput> {
 
   if (region) {
     const reg = idx.regions.find((x) => x.id === region)!;
-    const keys = reg.cells ?? (reg.bbox ? cellsForBbox(idx, reg.bbox) : []);
+    const keys = [...(onlyGastro ? [] : reg.cells ?? (reg.bbox ? cellsForBbox(idx, reg.bbox) : [])), ...(useGastro && reg.bbox ? await gastroCellsForBbox(reg.bbox) : [])];
     const r = await loadCells(keys); failed = r.failed;
     items = r.places.filter((p) => p.reg === region && passes(p));
   } else if (center) {
-    const steps = fixedR ? [fixedR] : [...new Set([startR, ...AUTO_RADIUS_STEPS_KM.filter((s) => s > startR)])].filter((s) => s <= 50);
+    const steps = fixedR ? [fixedR] : [...new Set([startR, ...AUTO_RADIUS_STEPS_KM.filter((s) => s > startR)])].filter((s) => s <= maxR);
     for (const km of steps) {
-      const r = await loadCells(cellsForBbox(idx, bboxForCircle(center, km)));
+      const r = await loadCells(await cellsFor(bboxForCircle(center, km)));
       failed = r.failed; radiusKm = km;
       items = r.places.filter((p) => distanceKm(center!, { lat: p.la, lng: p.ln }) <= km && passes(p));
       if (items.length >= AUTO_MIN_RESULTS) break;
     }
+    // Nichts im Umkreis: das nächste passende Objekt weiter draußen suchen (nur zum Anbieten, nie automatisch anzeigen)
+    if (!items.length && (fixedR ?? 0) < NEAREST_STEPS_KM[NEAREST_STEPS_KM.length - 1]!) {
+      const c0 = center;
+      for (const km of NEAREST_STEPS_KM.filter((k) => k > (radiusKm ?? 0))) {
+        const keys = (await cellsFor(bboxForCircle(c0, km))).map((k) => ({ k, d: distanceKm(c0, cellCenter(k.replace(/^g:/, ''))) })).sort((a, b) => a.d - b.d).slice(0, 60).map((x) => x.k);
+        const r = await loadCells(keys); failed = Math.max(failed, r.failed);
+        const hit = r.places.filter(passes).map((p) => ({ p, d: distanceKm(c0, { lat: p.la, lng: p.ln }) })).sort((a, b) => a.d - b.d)[0];
+        if (hit && hit.d <= km) { base.nearest = hit; break; }
+      }
+    }
     // Ortswahl ohne Einrichtungsdaten in der Nähe
     if (!items.length && wo && !Object.keys(idx.cells).some((k) => { const c = cellCenter(k); return Math.abs(c.lng - center!.lng) < 0.8 && Math.abs(c.lat - center!.lat) < 0.6; })) base.woNoData = true;
   } else {
-    // nur "Was?": nächstgelegene Zellen zur Kartenmitte (Budget 12 Zellen, bundesweit sind es tausende)
-    const keys = Object.keys(idx.cells).map((k) => ({ k, d: distanceKm(inp.mapCenter, cellCenter(k)) })).sort((a, b) => a.d - b.d);
-    const use = keys.slice(0, 12);
-    const r = await loadCells(use.map((x) => x.k)); failed = r.failed;
-    items = r.places.filter(passes);
+    // (ohne Bezugspunkt gibt es keine Suche: siehe need_where oben)
   }
 
   const ref = inp.userLoc ?? center;
@@ -279,7 +308,7 @@ export async function runSearch(inp: SearchInput): Promise<SearchOutput> {
   // Relevanz zuerst (passender Name/Typ), dann Entfernung
   withD.sort((a, b) => (tier.get(a.p)! - tier.get(b.p)!) || (a.d !== null && b.d !== null ? a.d - b.d : a.p.nm.localeCompare(b.p.nm, 'de')));
   const total = withD.length;
-  return { ...base, items: withD.slice(0, MAX_RESULTS), total, truncated: total > MAX_RESULTS, failedCells: failed, radiusKm, center, regionId: region, label, ref };
+  return { ...base, items: withD.slice(0, MAX_RESULTS), total, truncated: total > MAX_RESULTS, failedCells: failed, radiusKm, center, regionId: region, label, ref, searchedKm: radiusKm, refSrc };
 }
 
 export const getAllLoadedPlaces = (cells: string[]): Place[] => cells.flatMap((c) => getLoadedCell(c) ?? []);

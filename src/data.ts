@@ -1,6 +1,11 @@
 // Statische Daten laden (index.json, places-meta.json, Zellen) + Geo-Hilfen. Keine Server-API.
 import { CELL_SIZE, DATA_BASE } from './config';
-import type { DataIndex, DataMeta, Gazetteer, LatLng, Place } from './types';
+import { isGastroSub } from '../shared/taxonomy.js';
+import type { DataIndex, DataMeta, GastroIndex, Gazetteer, LatLng, Place } from './types';
+
+type CellIdx = { cells: Record<string, number> };
+/** Zellen-Schlüssel der Gastronomie (c-g/) tragen im URL-Hinweis (?c=) und in Caches das Präfix "g:" */
+export const GASTRO_PREFIX = 'g:';
 
 const j = async <T>(url: string): Promise<T> => {
   const r = await fetch(url, { cache: 'no-cache' });
@@ -15,6 +20,10 @@ export const loadIndex = (): Promise<DataIndex> => (indexP ??= j<DataIndex>(DATA
 // Orte + PLZ ("Wo?"): eigene Datei, erst bei Bedarf laden (nicht beim Start)
 let gazP: Promise<Gazetteer> | null = null;
 export const loadGazetteer = (): Promise<Gazetteer> => (gazP ??= loadIndex().then((i) => j<Gazetteer>(DATA_BASE + (i.gazetteer ?? 'gazetteer.json'))).catch((e) => { gazP = null; throw e; }));
+// Gastronomie: eigener Index + eigene Zellen (c-g/), erst bei eingeschalteter Gruppe / passender Suche laden. null = Build ohne Gastronomie.
+let gIdxP: Promise<GastroIndex | null> | null = null;
+let gIdxSync: GastroIndex | null = null;
+export const loadGastroIndex = (): Promise<GastroIndex | null> => (gIdxP ??= loadIndex().then((i) => (i.gastro ? j<GastroIndex>(DATA_BASE + i.gastro) : null)).then((g) => { gIdxSync = g; return g; }).catch((e) => { gIdxP = null; throw e; }));
 export const loadMeta = (): Promise<DataMeta> => (metaP ??= j<DataMeta>(DATA_BASE + 'places-meta.json').catch((e) => { metaP = null; throw e; }));
 
 const cells = new Map<string, Promise<Place[]>>();
@@ -22,13 +31,20 @@ const loadedCells = new Map<string, Place[]>();
 export const getLoadedCell = (k: string): Place[] | undefined => loadedCells.get(k);
 export const allLoadedCells = (): Place[][] => [...loadedCells.values()];
 
+/** key "x_y…" = staatliche Einrichtungen (c/), "g:x_y…" = Gastronomie (c-g/) */
 export function loadCell(key: string): Promise<Place[]> {
   let p = cells.get(key);
   if (!p) {
-    p = j<{ places: Place[] }>(`${DATA_BASE}c/${key}.json`).then((d) => { loadedCells.set(key, d.places); return d.places; }).catch((e) => { cells.delete(key); throw e; });
+    const url = key.startsWith(GASTRO_PREFIX) ? `${DATA_BASE}c-g/${key.slice(GASTRO_PREFIX.length)}.json` : `${DATA_BASE}c/${key}.json`;
+    p = j<{ places: Place[] }>(url).then((d) => { loadedCells.set(key, d.places); return d.places; }).catch((e) => { cells.delete(key); throw e; });
     cells.set(key, p);
   }
   return p;
+}
+/** Gastro-Zellen für eine BBox (lädt index-g.json bei Bedarf); Schlüssel mit Präfix "g:" für loadCell/loadCells */
+export async function gastroCellsForBbox(b: [number, number, number, number]): Promise<string[]> {
+  const g = await loadGastroIndex();
+  return g ? cellsForBbox(g, b).map((k) => GASTRO_PREFIX + k) : [];
 }
 
 export interface CellsResult { places: Place[]; failed: number }
@@ -53,16 +69,16 @@ export function cellBounds(key: string): CellBounds {
 }
 export const cellCenter = (key: string): LatLng => { const b = cellBounds(key); return { lat: (b.s + b.n) / 2, lng: (b.w + b.e) / 2 }; };
 const baseOf = (key: string): string => key.split('-')[0]!;
-const trees = new WeakMap<DataIndex, Map<string, string[]>>();
+const trees = new WeakMap<CellIdx, Map<string, string[]>>();
 /** Grundzelle -> vorhandene Blatt-Schlüssel (Index einmal gruppieren) */
-function treeOf(idx: DataIndex): Map<string, string[]> {
+function treeOf(idx: CellIdx): Map<string, string[]> {
   let t = trees.get(idx);
   if (!t) { t = new Map(); for (const k of Object.keys(idx.cells)) { const b = baseOf(k); const l = t.get(b); if (l) l.push(k); else t.set(b, [k]); } trees.set(idx, t); }
   return t;
 }
 
 /** vorhandene Zellen (mit Daten, ggf. geteilt) für eine BBox [west,south,east,north] */
-export function cellsForBbox(idx: DataIndex, b: [number, number, number, number]): string[] {
+export function cellsForBbox(idx: CellIdx, b: [number, number, number, number]): string[] {
   const out: string[] = [];
   const t = treeOf(idx);
   const x0 = Math.floor(b[0] / CELL_SIZE), x1 = Math.floor(b[2] / CELL_SIZE);
@@ -77,7 +93,7 @@ export function cellsForBbox(idx: DataIndex, b: [number, number, number, number]
   return out;
 }
 /** Blatt-Schlüssel, in dem ein Punkt liegt (nach Index); ohne Index: Grundzelle */
-export function leafKey(idx: DataIndex | null, lat: number, lng: number): string {
+export function leafKey(idx: CellIdx | null, lat: number, lng: number): string {
   let key = cellKey(lat, lng);
   if (!idx || idx.cells[key]) return key;
   const kids = treeOf(idx).get(key);
@@ -108,6 +124,7 @@ export function distanceKm(a: LatLng, b: LatLng): number {
 /** Objekt per ID finden. hint = Zellenschlüssel aus der URL (?c=). Ohne Treffer dort: schon geladene Zellen und die
  *  Nachbarzellen des Hinweises (Zellen können sich beim Neubau ändern). Nie alle Zellen laden (bundesweit tausende). */
 export async function findPlace(id: string, hint?: string | null): Promise<Place | null> {
+  if (hint?.startsWith(GASTRO_PREFIX)) return findGastroPlace(id, hint.slice(GASTRO_PREFIX.length));
   const idx = await loadIndex();
   const t = treeOf(idx);
   const order: string[] = [];
@@ -137,5 +154,26 @@ export function addressLine(p: Place): string | null {
   const parts = [street, city].filter(Boolean);
   return parts.length ? parts.join(', ') : null;
 }
-export const placeCell = (p: Place): string => leafKey(treeFor, p.la, p.ln);
+async function findGastroPlace(id: string, hint: string): Promise<Place | null> {
+  const g = await loadGastroIndex();
+  if (!g) return null;
+  const t = treeOf(g);
+  const order: string[] = [];
+  const add = (k: string): void => { if (g.cells[k] && !order.includes(GASTRO_PREFIX + k)) order.push(GASTRO_PREFIX + k); };
+  if (g.cells[hint]) add(hint); else for (const k of t.get(baseOf(hint)) ?? []) add(k);
+  if (/^-?\d+_-?\d+/.test(hint)) {
+    const [x, y] = baseOf(hint).split('_').map(Number) as [number, number];
+    for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (const k of t.get(`${x + dx}_${y + dy}`) ?? []) add(k);
+  }
+  let failed: unknown = null;
+  for (const k of order) {
+    let list: Place[] = [];
+    try { list = await loadCell(k); } catch (e) { failed = e; continue; }
+    const p = list.find((x) => x.id === id);
+    if (p) return p;
+  }
+  if (failed) throw failed;
+  return null;
+}
+export const placeCell = (p: Place): string => (isGastroSub(p.s) ? GASTRO_PREFIX + leafKey(gIdxSync, p.la, p.ln) : leafKey(treeFor, p.la, p.ln));
 export const placeSlug = (p: Place, slugify: (s: string) => string): string => `${p.id}-${slugify(p.nm)}`;

@@ -1,7 +1,7 @@
 import { GROUPS } from '../../shared/taxonomy.js';
 import { A, S } from '../ctx';
 import { getLoadedCell } from '../data';
-import { type Filters, emptyFilters, matches, subsOfGroup } from '../filters';
+import { type Filters, RADIUS_OPTIONS, emptyFilters, isAllCategories, matches, normalizeFilters, subsOfGroup } from '../filters';
 import { hoursReady } from '../hours';
 import { t } from '../i18n';
 import { groupLabel, subLabel } from '../ui/components';
@@ -43,13 +43,19 @@ export function openFilterDialog(): void {
       return h('div', null, h('label', { class: 'check', for: id }, c, h('span', null, label)), hint ? h('p', { class: 'meta indent' }, hint) : null);
     };
     const radio = (v: 'auto' | number, label: string): HTMLElement => { const id = `fr-${v}`; const r = h('input', { type: 'radio', name: 'radius', id, onchange: () => { d.radius = v; paint(); } }); r.checked = d.radius === v; return h('label', { class: 'radio', for: id }, r, h('span', null, label)); };
+    const allId = 'fs-all';
+    const allBox = h('input', { type: 'checkbox', id: allId, onchange: () => { d.subs = new Set(); paint(); } });
+    allBox.checked = isAllCategories(d.subs);
+    allBox.disabled = isAllCategories(d.subs) && d.subs.size === 0; // schon „Alle“: Auswahl einer Kategorie hebt es auf
     replace(body,
+      h('div', { class: 'fgroup' }, h('label', { class: 'check', for: allId }, allBox, h('span', null, t('filter.all')))),
+      h('p', { class: 'meta indent' }, t('filter.all_hint')),
       h('div', { class: 'fgroups' }, groups),
       h('section', { class: 'sec' }, h('h3', null, t('filter.extra.title')), chk('withHours', t('filter.extra.with_hours')), chk('openNow', t('filter.extra.open_now'), t('filter.extra.open_now_hint')), chk('wheelchair', t('filter.extra.wheelchair'), t('filter.extra.wheelchair_hint'))),
-      h('fieldset', { class: 'fs' }, h('legend', null, t('filter.radius.title')), radio('auto', t('filter.radius.auto')), [1, 5, 10, 25].map((k) => radio(k, t('filter.radius.option', { km: k })))));
+      h('fieldset', { class: 'fs' }, h('legend', null, t('filter.radius.title')), radio('auto', t('filter.radius.auto')), RADIUS_OPTIONS.filter((k) => k <= 100).map((k) => radio(k, t('filter.radius.option', { km: k })))));
     count();
   };
-  applyBtn.addEventListener('click', () => { closeTop(); A.setFilters(d); });
+  applyBtn.addEventListener('click', () => { closeTop(); A.setFilters(normalizeFilters(d)); });
   const el = h('div', { class: 'overlay filter-overlay' },
     h('div', { class: 'overlay-head' }, closeButton(() => closeTop(), t('filter.close_aria')), h('h2', null, t('filter.title')),
       h('button', { class: 'link-btn', type: 'button', onclick: () => { d = emptyFilters(); paint(); } }, t('filter.reset'))),

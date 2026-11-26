@@ -13,7 +13,10 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { GROUPS, GROUP_OF, SUBS, slugify } from '../shared/taxonomy.js';
+import { GROUPS as ALL_GROUPS, GROUP_OF, SUBS as ALL_SUBS, GASTRO_GROUP, slugify } from '../shared/taxonomy.js';
+// Gastronomie (OSM, nicht staatlich) ist bewusst nicht Teil der SEO-Seiten: eigene Dateien (c-g/), keine Kategorie-/Stadt-/Detailseiten, nicht in der Sitemap.
+const GROUPS = ALL_GROUPS.filter((g) => g.slug !== GASTRO_GROUP);
+const SUBS = ALL_SUBS.filter((x) => x.group !== GASTRO_GROUP);
 import { LANGS, NOINDEX_STATIC, STATIC_PAGES, fitDescription, fitTitle, ldString, pagePath, pageUrl, placeJsonLd, placePath, websiteJsonLd } from '../shared/seo.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');

@@ -1,22 +1,25 @@
 import { A, S } from '../ctx';
 import { addressLine, findPlace, loadMeta } from '../data';
 import { deviceInOtherZone, hoursReady, loadHours, statusOf, weekTable } from '../hours';
-import { fmtDate, t } from '../i18n';
+import { t } from '../i18n';
 import { getRoute, href, navigate } from '../router';
 import { addFavorite, getFavorites, getNote, isFavorite, removeFavorite, setNote } from '../storage';
 import { STATES } from '../../shared/states.js';
 import type { Place } from '../types';
-import { banner, distanceText, field, groupBadge, placeHref, skeletonRows, subLabel } from '../ui/components';
+import { backButton, banner, distanceText, field, groupBadge, placeHref, ratingSlot, skeletonRows, subLabel } from '../ui/components';
 import { h, replace } from '../ui/dom';
 import { icon } from '../ui/icons';
-import { googleReviews, osmObject, telHref } from '../util';
-import { distanceKm } from '../data';
+import { googleReviews, telHref } from '../util';
+import { distanceKm, placeCell } from '../data';
+import { armRoute } from './route';
 
 const section = (title: string, ...children: (Node | null | false)[]): HTMLElement => h('section', { class: 'sec' }, h('h2', null, title), ...children);
 
+/** Zurück: ein Schritt im App-Verlauf (Liste/Karte mit Ausschnitt, Suche und Filtern kommen aus dem History-Eintrag zurück);
+ *  ohne vorherigen App-Eintrag (Deep-Link) zur Ergebnisliste bzw. zur Karte. */
 export function backTarget(): { label: string; run: () => void } {
-  if (S.mode === 'results' && S.res) return { label: t('nav.back_to_list'), run: () => navigate(A.searchHref()) };
-  return { label: t('nav.back_to_map'), run: () => navigate('/') };
+  const fallback = S.mode === 'results' && S.res ? A.searchHref() : '/';
+  return { label: t('common.action.back'), run: () => A.back(fallback) };
 }
 
 export async function renderPlace(host: HTMLElement, id: string, hint: string | null, onLoaded: (p: Place | null) => void): Promise<void> {
@@ -37,7 +40,6 @@ export async function renderPlace(host: HTMLElement, id: string, hint: string | 
   }
   onLoaded(p);
   const place = p;
-  const bt = backTarget();
   const name = place.nm;
   const addr = addressLine(place);
 
@@ -66,7 +68,7 @@ export async function renderPlace(host: HTMLElement, id: string, hint: string | 
     paintFav();
   });
   const actions = h('div', { class: 'actionbar' },
-    h('a', { class: 'btn btn-primary action', href: href(`/einrichtung/${place.id}/route?c=${hint ?? ''}`) }, icon('route'), h('span', null, t('place.action.route'))),
+    h('a', { class: 'btn btn-primary action', href: href(`/einrichtung/${place.id}/route?c=${hint ?? ''}`), onclick: () => armRoute(place.id) }, icon('route'), h('span', null, t('place.action.route'))),
     tel ? h('a', { class: 'btn action', href: tel, 'aria-label': t('place.action.call_aria', { name }) }, icon('phone'), h('span', null, t('place.action.call'))) : null,
     place.web ? h('a', { class: 'btn action', href: place.web, target: '_blank', rel: 'noopener noreferrer', 'aria-label': t('place.action.website_aria', { name }) }, icon('globe'), h('span', null, t('place.action.website'))) : null,
     favBtn);
@@ -119,17 +121,6 @@ export async function renderPlace(host: HTMLElement, id: string, hint: string | 
       h('button', { class: 'btn', type: 'button', onclick: () => { noteMsg.textContent = setNote(place.id, ta.value) ? t('place.note.saved') : t('favorites.error.storage_unavailable'); } }, t('place.note.save')),
       h('button', { class: 'btn', type: 'button', onclick: () => { ta.value = ''; setNote(place.id, ''); noteMsg.textContent = t('settings.data.done'); } }, t('place.note.delete'))), noteMsg);
 
-  // Quelle
-  const srcBox = h('dl', { class: 'fields' });
-  void loadMeta().then((m) => {
-    replace(srcBox,
-      field(t('place.source.source', { source: '' }).replace(/:\s*$/, ''), 'OpenStreetMap', { href: osmObject(place) }),
-      field(t('place.source.stand', { date: '' }).replace(/:\s*$/, ''), fmtDate(m.stand)),
-      field(t('place.source.last_edit', { date: '' }).replace(/:\s*$/, ''), place.ts ? fmtDate(place.ts) : null),
-      field(t('place.source.last_checked', { date: '' }).replace(/:\s*$/, ''), place.cd ? fmtDate(place.cd) : null),
-      field(t('place.source.license', { license: '' }).replace(/:\s*$/, ''), 'ODbL 1.0', { href: m.license_url }));
-  }).catch(() => replace(srcBox, field(t('place.source.source', { source: '' }).replace(/:\s*$/, ''), 'OpenStreetMap', { href: osmObject(place) })));
-
   const fromUser = S.userLoc ? distanceKm(S.userLoc, { lat: place.la, lng: place.ln }) : null;
   const group = h('div', { class: 'place-head' }, groupBadge(place.s, 48), h('div', null, h('p', { class: 'row-sub' }, subLabel(place.s)), h('h1', { lang: 'de' }, name)));
   const email = place.em && /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(place.em) ? place.em : null;
@@ -152,14 +143,12 @@ export async function renderPlace(host: HTMLElement, id: string, hint: string | 
     section(t('place.access.title'), h('dl', { class: 'fields' },
       field(t('place.access.title'), place.wc ? t(`place.access.wheelchair_${place.wc}`) : null)), place.wc ? h('p', { class: 'meta' }, t('place.access.source_note')) : null),
     note,
+    // Bewertungen: nur der Google-Maps-Knopf; ratingSlot() ist der (noch versteckte) Platz für Google-Sterne
     section(t('place.google_reviews.title'),
+      ratingSlot(),
       h('a', { class: 'btn btn-block', href: googleReviews(place), target: '_blank', rel: 'noopener noreferrer', 'aria-label': t('place.google_reviews.aria', { name }) }, icon('star'), h('span', null, t('place.google_reviews.cta')), icon('external', { size: 16 })),
-      h('p', { class: 'meta' }, t('place.google_reviews.note') + ' ' + t('reviews.info.not_checked'))),
-    section(t('place.source.title'), srcBox, h('p', { class: 'meta' }, t('place.source.disclaimer')),
-      h('a', { class: 'link', href: osmObject(place), target: '_blank', rel: 'noopener noreferrer' }, t('place.source.view_osm'), ' ', icon('external', { size: 14 }))),
-    h('p', null, h('a', { class: 'link', href: href(`/einrichtung/${place.id}/fehler-melden?c=${hint ?? ''}`) }, icon('warning', { size: 16 }), ' ', t('place.report'))),
-    ['behoerden', 'fachaemter'].includes(placeGroup(place)) ? h('p', { class: 'meta' }, t('place.hint_115')) : null,
-    h('p', { class: 'meta' }, h('span', { class: 'visually-hidden' }, bt.label)));
+      h('p', { class: 'meta small' }, t('place.google_reviews.note'))),
+    ['behoerden', 'fachaemter'].includes(placeGroup(place)) ? h('p', { class: 'meta' }, t('place.hint_115')) : null);
   replace(host, el);
 }
 
@@ -177,8 +166,9 @@ function phoneFields(p: Place): HTMLElement {
 
 function topBar(p: Place | null): HTMLElement {
   const bt = backTarget();
+  const menu = p ? placeMenu(p) : null;
   return h('div', { class: 'page-head place-top' },
-    h('button', { class: 'icon-btn', type: 'button', 'aria-label': bt.label, onclick: bt.run }, icon('back')),
+    backButton(bt.run),
     h('span', { class: 'spacer' }),
     p ? h('button', { class: 'icon-btn', type: 'button', 'aria-label': t('place.share'), onclick: async () => {
       const url = location.origin + placeHref(p);
@@ -187,5 +177,27 @@ function topBar(p: Place | null): HTMLElement {
         else { await navigator.clipboard.writeText(url); A.toast(t('place.link_copied')); }
       } catch { /* abgebrochen */ }
     } }, icon('share')) : null,
+    menu,
     h('button', { class: 'icon-btn', type: 'button', 'aria-label': t('place.close_aria'), onclick: bt.run }, icon('close')));
+}
+
+/** Menü „⋯“: Fehler melden und Datenquellen (der frühere Block „Datenquelle“ ist von der Karte entfernt) */
+function placeMenu(p: Place): HTMLElement {
+  const cell = placeCell(p);
+  const list = h('ul', { class: 'menu-list', role: 'menu', hidden: true },
+    h('li', { role: 'none' }, h('a', { role: 'menuitem', href: href(`/einrichtung/${p.id}/fehler-melden?c=${cell}`) }, icon('warning', { size: 18 }), h('span', null, t('place.report')))),
+    h('li', { role: 'none' }, h('a', { role: 'menuitem', href: href('/datenquellen') }, icon('info', { size: 18 }), h('span', null, t('place.menu.sources')))));
+  const btn = h('button', { class: 'icon-btn', type: 'button', 'aria-label': t('place.menu.label'), 'aria-haspopup': 'menu', 'aria-expanded': 'false' }, icon('more'));
+  const wrap = h('div', { class: 'menu-wrap' }, btn, list);
+  const close = (): void => { list.hidden = true; btn.setAttribute('aria-expanded', 'false'); document.removeEventListener('pointerdown', outside, true); document.removeEventListener('keydown', esc, true); };
+  const outside = (e: Event): void => { if (!wrap.contains(e.target as Node)) close(); };
+  const esc = (e: KeyboardEvent): void => { if (e.key === 'Escape') { close(); btn.focus(); } };
+  btn.addEventListener('click', () => {
+    if (!list.hidden) { close(); return; }
+    list.hidden = false; btn.setAttribute('aria-expanded', 'true');
+    document.addEventListener('pointerdown', outside, true); document.addEventListener('keydown', esc, true);
+    list.querySelector<HTMLElement>('a')?.focus();
+  });
+  list.addEventListener('click', () => close());
+  return wrap;
 }
