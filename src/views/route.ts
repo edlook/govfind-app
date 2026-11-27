@@ -8,6 +8,7 @@ import type { LatLng, Place } from '../types';
 import { backButton, banner, distanceText, skeletonRows } from '../ui/components';
 import { h, replace } from '../ui/dom';
 import { icon } from '../ui/icons';
+import { navActive, startNavigation } from '../nav';
 import { appleDir, geoUri, googleDir, isAndroid, isApple } from '../util';
 
 const MODES: TravelMode[] = ['walk', 'car', 'transit'];
@@ -142,9 +143,16 @@ export async function renderRoute(host: HTMLElement, id: string, hint: string | 
     return h('div', null,
       h('p', { class: 'route-sum' }, h('strong', null, fmtDuration(r.durationS))),
       h('p', { class: 'route-sub2' }, t('route.arrival', { time: arrive }), ' · ', distanceText(r.distanceM / 1000)),
-      steps.length ? h('button', { class: 'btn btn-primary btn-block', type: 'button', 'aria-expanded': String(showSteps),
+      h('button', { class: 'btn btn-primary btn-block nav-go', type: 'button',
+        onclick: () => {
+          if (navActive()) return;
+          A.setSheet('peek');
+          startNavigation({ route: r, dest, destName: place.nm, mode: r.mode, onRoute: (nr) => { result = nr; times[mode] = nr.durationS; },
+            onEnd: () => { A.setSheet('half'); paint(); draw(); } });
+        } }, icon('navigate'), h('span', null, t('nav.start'))),
+      steps.length ? h('button', { class: 'btn btn-block', type: 'button', 'aria-expanded': String(showSteps),
         onclick: () => { showSteps = !showSteps; if (showSteps) A.setSheet('full'); paint(); } },
-        icon('navigate'), h('span', null, showSteps ? t('route.steps.hide') : t('route.start'))) : null,
+        icon('route'), h('span', null, showSteps ? t('route.steps.hide') : t('route.start'))) : null,
       showSteps ? h('ol', { class: 'step-list' }, steps.map((s) => {
         const k = stepKey(s);
         const text = t(k.key, k.params) + (k.onto && s.name ? ' ' + t('route.step.onto', { street: s.name }) : '');

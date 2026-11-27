@@ -169,6 +169,14 @@ export class MapController {
   fitBounds(b: Bounds, padBottom = 0): void {
     this.map.fitBounds([[b[0], b[1]], [b[2], b[3]]], { padding: { top: 100, bottom: padBottom + 20, left: 40, right: 40 }, maxZoom: 15, duration: this.reduce ? 0 : 700 });
   }
+  /** Navigation: Karte folgt der Position (Blickrichtung = Fahrtrichtung, Position im unteren Drittel) */
+  follow(c: LatLng, bearing: number | null, zoom: number): void {
+    const o = { center: [c.lng, c.lat] as [number, number], zoom, padding: { top: 260, bottom: 40, left: 0, right: 0 }, ...(bearing !== null ? { bearing } : {}), pitch: 0 };
+    if (this.reduce) this.map.jumpTo(o); else this.map.easeTo({ ...o, duration: 900, essential: true, easing: (x: number) => x });
+  }
+  endFollow(): void { this.map.easeTo({ bearing: 0, pitch: 0, padding: { top: 0, bottom: 0, left: 0, right: 0 }, duration: this.reduce ? 0 : 400 }); }
+  /** Meldet, wenn die Nutzenden die Karte selbst verschieben (Navigation pausiert das Folgen) */
+  onUserDrag(cb: () => void): () => void { this.map.on('dragstart', cb); return () => { this.map.off('dragstart', cb); }; }
   zoomBy(d: number): void { this.map.easeTo({ zoom: this.map.getZoom() + d, duration: this.reduce ? 0 : 200 }); }
   setReduceMotion(v: boolean): void { this.reduce = v; }
   setTheme(theme: 'light' | 'dark'): void {

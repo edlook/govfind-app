@@ -204,5 +204,20 @@
   "cuisine.kumpir": "Kumpir",
   "route.arrival": "Arrive at {time}",
   "route.start": "Directions",
-  "route.steps.hide": "Hide directions"
+  "route.steps.hide": "Hide directions",
+  "nav.start": "Start",
+  "nav.end": "End",
+  "nav.searching": "Finding your location …",
+  "nav.in": "In {dist}: {text}",
+  "nav.arrived": "You have arrived.",
+  "nav.rerouting": "Recalculating route …",
+  "nav.rerouted": "New route calculated.",
+  "nav.reroute_failed": "Could not recalculate. Follow the map to the destination.",
+  "nav.voice_on": "Voice on",
+  "nav.voice_off": "Voice off",
+  "nav.recenter": "Re-center",
+  "nav.remaining": "{time} · {dist}",
+  "nav.done": "Done",
+  "nav.no_gps": "No location available. Please allow location services.",
+  "nav.head": "Continue on the route"
 }

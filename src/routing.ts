@@ -13,7 +13,7 @@ export class RouteError extends Error {
   constructor(public kind: RouteErrorKind, public status?: number) { super(`route:${kind}${status ? ':' + status : ''}`); }
 }
 
-export interface RouteStep { type: string; modifier?: string; name?: string; distanceM: number; durationS: number; exit?: number }
+export interface RouteStep { type: string; modifier?: string; name?: string; distanceM: number; durationS: number; exit?: number; loc?: Coord }
 export interface RoadRoute { kind: 'road'; mode: 'walk' | 'car'; distanceM: number; durationS: number; coords: Coord[]; steps: RouteStep[]; provider: string }
 
 export interface TransitLeg {
@@ -46,7 +46,7 @@ export function decodePolyline(str: string, precision = 6): Coord[] {
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 const isCoord = (c: unknown): c is Coord => Array.isArray(c) && isNum(c[0]) && isNum(c[1]);
 
-interface OsrmJson { code?: string; routes?: { distance?: number; duration?: number; geometry?: { coordinates?: unknown[] }; legs?: { steps?: { distance?: number; duration?: number; name?: string; maneuver?: { type?: string; modifier?: string; exit?: number } }[] }[] }[] }
+interface OsrmJson { code?: string; routes?: { distance?: number; duration?: number; geometry?: { coordinates?: unknown[] }; legs?: { steps?: { distance?: number; duration?: number; name?: string; maneuver?: { type?: string; modifier?: string; exit?: number; location?: unknown } }[] }[] }[] }
 export function parseOsrm(json: unknown, mode: 'walk' | 'car', provider: string): RoadRoute {
   const j = json as OsrmJson;
   if (j?.code === 'NoRoute' || j?.code === 'NoSegment') throw new RouteError('no_route');
@@ -56,7 +56,7 @@ export function parseOsrm(json: unknown, mode: 'walk' | 'car', provider: string)
   if (coords.length < 2) throw new RouteError('bad_response');
   const steps: RouteStep[] = [];
   for (const leg of r.legs ?? []) for (const s of leg.steps ?? []) {
-    steps.push({ type: s.maneuver?.type ?? 'continue', ...(s.maneuver?.modifier ? { modifier: s.maneuver.modifier } : {}), ...(s.name ? { name: s.name } : {}), distanceM: s.distance ?? 0, durationS: s.duration ?? 0, ...(isNum(s.maneuver?.exit) ? { exit: s.maneuver!.exit } : {}) });
+    steps.push({ type: s.maneuver?.type ?? 'continue', ...(s.maneuver?.modifier ? { modifier: s.maneuver.modifier } : {}), ...(s.name ? { name: s.name } : {}), distanceM: s.distance ?? 0, durationS: s.duration ?? 0, ...(isNum(s.maneuver?.exit) ? { exit: s.maneuver!.exit } : {}), ...(isCoord(s.maneuver?.location) ? { loc: s.maneuver!.location as Coord } : {}) });
   }
   return { kind: 'road', mode, distanceM: r.distance, durationS: r.duration, coords, steps, provider };
 }

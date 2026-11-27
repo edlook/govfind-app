@@ -204,5 +204,20 @@
   "cuisine.kumpir": "Kumpir",
   "route.arrival": "Ankunft um {time}",
   "route.start": "Wegbeschreibung",
-  "route.steps.hide": "Wegbeschreibung ausblenden"
+  "route.steps.hide": "Wegbeschreibung ausblenden",
+  "nav.start": "Starten",
+  "nav.end": "Beenden",
+  "nav.searching": "Standort wird gesucht …",
+  "nav.in": "In {dist}: {text}",
+  "nav.arrived": "Sie haben Ihr Ziel erreicht.",
+  "nav.rerouting": "Route wird neu berechnet …",
+  "nav.rerouted": "Neue Route berechnet.",
+  "nav.reroute_failed": "Neuberechnung nicht möglich. Folgen Sie der Karte zum Ziel.",
+  "nav.voice_on": "Ansagen an",
+  "nav.voice_off": "Ansagen aus",
+  "nav.recenter": "Zentrieren",
+  "nav.remaining": "{time} · {dist}",
+  "nav.done": "Fertig",
+  "nav.no_gps": "Kein Standort verfügbar. Bitte Ortungsdienste erlauben.",
+  "nav.head": "Weiter auf der Route"
 }

@@ -271,7 +271,6 @@ details > summary { cursor: pointer; }
 @media (max-width: 767px) {
   /* In „peek“ und „half“ ist die ganze Schublade die Ziehfläche (Inhalt scrollt erst in „full“); in „full“ nur der Griff */
   .app[data-sheet='peek'] .panel { touch-action: none; }
-  .app[data-sheet='half'] .panel { touch-action: none; }
   .app[data-sheet='half'] .panel-body { touch-action: pan-y; } /* „half“: Inhalt scrollt; erstes Scrollen fährt die Schublade auf „full“ */
   .app[data-sheet='full'] .sheet-handle { touch-action: none; }
   .search-form.sf-overlay .submit { position: sticky; bottom: 0; }
@@ -391,3 +390,20 @@ h1, h2 { letter-spacing: -0.01em; }
 .route-sub2 { margin: 2px 0 12px; color: var(--text2); }
 .seg span { font-weight: 700; }
 @media (min-width: 768px) { .route-top { left: calc(var(--panel-w) + 12px); right: 72px; } }
+
+/* ---------- Live-Navigation ---------- */
+.app[data-nav] .panel, .app[data-nav] .tabbar, .app[data-nav] .route-top, .app[data-nav] .banners { display: none; }
+.nav-top { position: absolute; z-index: 30; top: calc(10px + env(safe-area-inset-top)); left: 12px; right: 12px; display: flex; align-items: center; gap: 14px; padding: 14px 18px; background: #1b2a4a; color: #fff; border-radius: 18px; box-shadow: var(--shadow); }
+.nav-arrow { flex: none; width: 56px; height: 56px; display: grid; place-items: center; transition: transform 0.25s ease-out; }
+.nav-arrow svg { fill: #fff; }
+.nav-main { min-width: 0; }
+.nav-dist { font-size: 1.9rem; font-weight: 800; line-height: 1.1; }
+.nav-text { font-size: 1.05rem; font-weight: 600; opacity: 0.95; overflow-wrap: anywhere; }
+.nav-bottom { position: absolute; z-index: 30; left: 0; right: 0; bottom: 0; display: flex; align-items: center; gap: 10px; padding: 14px 16px calc(14px + env(safe-area-inset-bottom)); background: var(--bg2); border-radius: 20px 20px 0 0; box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.18); }
+.nav-sum { flex: 1; min-width: 0; }
+.nav-rem { font-size: 1.25rem; font-weight: 800; }
+.nav-eta { color: var(--text2); font-size: 0.9rem; }
+.nav-btn { min-width: 48px; min-height: 48px; padding: 0; justify-content: center; }
+.nav-end { min-height: 48px; padding: 0 22px; background: #d33; border-color: #d33; }
+.nav-recenter { position: absolute; z-index: 31; left: 12px; bottom: calc(96px + env(safe-area-inset-bottom)); box-shadow: var(--shadow); background: var(--bg2); }
+.app[data-nav] .map-ctl, .app[data-nav] .map-controls { bottom: calc(110px + env(safe-area-inset-bottom)); }

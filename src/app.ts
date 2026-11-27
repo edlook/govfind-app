@@ -23,6 +23,7 @@ import { renderList } from './views/list';
 import { renderEmergency, renderHelp, renderImprint, renderMore, renderNotFound, renderPrivacy, renderReport, renderSources } from './views/pages';
 import { renderPlace } from './views/place';
 import { renderRoute } from './views/route';
+import { stopNavigation } from './nav';
 import { createSearchForm, type SearchForm } from './views/search-form';
 import { renderSettings } from './views/settings';
 import { slugify } from '../shared/taxonomy.js';
@@ -162,7 +163,7 @@ function initSheetDrag(): void {
     A.setSheet(best);
   }
   panel.addEventListener('pointerdown', (e) => {
-    if (isDesktop() || !e.isPrimary || (e.pointerType === 'mouse' && e.button !== 0)) return;
+    if (isDesktop() || !e.isPrimary || e.pointerType === 'touch' || (e.pointerType === 'mouse' && e.button !== 0)) return;
     const target = e.target as Element;
     const onHandle = R.handle.contains(target);
     if (d) finish(true); else if (panel.style.transform) resetPanelInline();
@@ -188,38 +189,49 @@ function initSheetDrag(): void {
   });
   // „half“: Inhalt ist scrollbar; sobald gescrollt wird, Schublade auf „full“ fahren
   R.body.addEventListener('scroll', () => { if (!isDesktop() && S.sheet === 'half' && R.body.scrollTop > 6) A.setSheet('full'); }, { passive: true });
-  // „half“: Wischen nach unten auf dem Inhalt (ganz oben) zieht die Schublade. iOS kennt touch-action „pan-up“ nicht, daher per Touch-Ereignissen
-  // (touchmove nicht passiv: preventDefault verhindert das Scrollen, solange die Geste die Schublade zieht).
+  // Touch-Geräte: Schublade über Touch-Ereignisse ziehen (Pointer-Ereignisse + touch-action sind auf iOS unzuverlässig).
+  //  - Griff/Kopfbereich: immer ziehen; „peek“: überall ziehen; Inhalt ganz oben: „half“ nach oben/unten, „full“ nach unten ziehen; sonst scrollt der Inhalt.
+  //  - touchmove nicht passiv: preventDefault verhindert Scrollen/Seitenbewegung, solange die Geste die Schublade zieht.
   {
-    let tr: { x0: number; y0: number; startT: number; lastY: number; lastT: number; vy: number; drag: boolean } | null = null;
-    R.body.addEventListener('touchstart', (e) => {
-      if (isDesktop() || S.sheet === 'peek' || e.touches.length !== 1) { tr = null; return; }
+    interface Tr { x0: number; y0: number; startT: number; lastY: number; lastT: number; vy: number; inBody: boolean; onHandle: boolean; decided: boolean; drag: boolean }
+    let tr: Tr | null = null;
+    panel.addEventListener('touchstart', (e) => {
+      const target = e.target as Element;
+      if (isDesktop() || e.touches.length !== 1 || target.closest('textarea,input,select')) { tr = null; return; }
       const tc = e.touches[0]!;
-      tr = { x0: tc.clientX, y0: tc.clientY, startT: ty(), lastY: tc.clientY, lastT: e.timeStamp, vy: 0, drag: false };
+      tr = { x0: tc.clientX, y0: tc.clientY, startT: ty(), lastY: tc.clientY, lastT: e.timeStamp, vy: 0, inBody: R.body.contains(target), onHandle: R.handle.contains(target), decided: false, drag: false };
     }, { passive: true });
-    R.body.addEventListener('touchmove', (e) => {
+    panel.addEventListener('touchmove', (e) => {
       if (!tr || e.touches.length !== 1) return;
       const tc = e.touches[0]!; const dy = tc.clientY - tr.y0; const dx = tc.clientX - tr.x0;
-      if (!tr.drag) {
-        if (Math.abs(dy) < 8 || Math.abs(dy) < Math.abs(dx)) return;
-        if (dy > 0 && R.body.scrollTop <= 0) { tr.drag = true; panel.classList.add('dragging'); panel.style.transition = 'none'; }
-        else { tr = null; return; } // Scrollen des Inhalts
+      if (!tr.decided) {
+        if (Math.abs(dy) < 3 && Math.abs(dx) < 3) return;
+        if (Math.abs(dx) > Math.abs(dy)) { tr = null; return; }
+        const atTop = R.body.scrollTop <= 0;
+        const want = !tr.inBody || S.sheet === 'peek' || (atTop && (dy > 0 || S.sheet === 'half'));
+        if (!want) { tr = null; return; }
+        tr.decided = true; tr.drag = true; panel.classList.add('dragging'); panel.style.transition = 'none';
+        tr.y0 = tc.clientY; tr.startT = ty(); // Ziehen beginnt ab hier (kein Sprung)
+        tr.lastY = tc.clientY; tr.lastT = e.timeStamp;
+        return;
       }
       const dt = e.timeStamp - tr.lastT;
       if (dt > 0) tr.vy = 0.8 * tr.vy + 0.2 * ((tc.clientY - tr.lastY) / dt);
       tr.lastY = tc.clientY; tr.lastT = e.timeStamp;
-      panel.style.transform = `translateY(${Math.max(0, Math.min(snaps().peek, tr.startT + dy))}px)`;
+      panel.style.transform = `translateY(${Math.max(0, Math.min(snaps().peek, tr.startT + (tc.clientY - tr.y0)))}px)`;
       if (e.cancelable) e.preventDefault();
     }, { passive: false });
     const endTouch = (cancelled: boolean): void => {
       const cur = tr; tr = null;
-      if (!cur || !cur.drag) return;
+      if (!cur) return;
+      if (!cur.drag) { if (cur.onHandle && !cancelled) A.setSheet((['peek', 'half', 'full'] as SheetState[])[(['peek', 'half', 'full'].indexOf(S.sheet) + 1) % 3]!); return; }
       d = { id: -1, x0: cur.x0, y0: cur.y0, startT: cur.startT, maxT: snaps().peek, moved: true, handle: false, lastY: cur.lastY, lastT: cur.lastT, vy: cur.vy };
       finish(cancelled);
     };
-    R.body.addEventListener('touchend', () => endTouch(false), { passive: true });
-    R.body.addEventListener('touchcancel', () => endTouch(true), { passive: true });
+    panel.addEventListener('touchend', () => endTouch(false), { passive: true });
+    panel.addEventListener('touchcancel', () => endTouch(true), { passive: true });
   }
+  R.body.addEventListener('scroll', () => { if (!isDesktop() && S.sheet === 'half' && R.body.scrollTop > 6) A.setSheet('full'); }, { passive: true });
   panel.addEventListener('pointerup', () => finish(false));
   panel.addEventListener('pointercancel', () => finish(true));
   panel.addEventListener('lostpointercapture', () => { if (d?.moved) finish(false); });
@@ -341,6 +353,7 @@ function toggleSub(s: string): void { const n = new Set(S.filters.subs); if (n.h
 function submitSearch(was: string, wo: string, o: { nearby?: boolean } = {}): void {
   addHistory(was, o.nearby ? '' : wo);
   S.was = was; S.wo = o.nearby ? '' : wo; S.nearby = !!o.nearby;
+  if (was && S.filters.subs.size) { S.filters = normFilters({ ...S.filters, subs: new Set() }); paintChips(); } // neuer Suchbegriff: alte Kategorie-Auswahl (z. B. „Justiz“) darf ihn nicht ausblenden
   closeOverlayIfOpen();
   const p = new URLSearchParams();
   if (was) p.set('was', was); if (S.wo) p.set('wo', S.wo); if (o.nearby) p.set('nearby', '1');
@@ -583,7 +596,7 @@ function handleRoute(r: Route): void {
   syncH1(r);
   // JSON-LD aus dem Vorab-Rendering gehört nur zur zuerst geladenen Seite: bei App-Navigation entfernen (sonst falsche Daten)
   if (!first) document.head.querySelectorAll('script[data-prerender-ld]').forEach((n) => n.remove());
-  if (r.name !== 'route') { S.map?.setRoute(null, null); document.querySelector('.route-top')?.remove(); R.app.removeAttribute('data-route'); }
+  if (r.name !== 'route') { S.map?.setRoute(null, null); document.querySelector('.route-top')?.remove(); R.app.removeAttribute('data-route'); stopNavigation(); }
   if (r.name !== 'place' && r.name !== 'route' && r.name !== 'report') S.map?.setSelected(null);
   if (r.name === 'map' || r.name === 'search') {
     S.filters = filtersFromQuery(r.q); paintChips();
