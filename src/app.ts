@@ -343,6 +343,9 @@ function setFilters(f0: Filters): void {
     new URLSearchParams(filterQuery(f)).forEach((v, k) => q.set(k, v));
     replaceQuery(r.path + (q.toString() ? '?' + q.toString() : ''));
     if (S.mode === 'results' && r.name === 'search') void doSearch(); else { void refreshBrowse(); renderPanel(); }
+  } else if (r.name === 'place' || r.name === 'route' || r.name === 'report') {
+    // Kategorie-Chip bei geöffneter Karte/Route: zurück zur Karte mit dieser Kategorie (statt „nichts passiert“)
+    const q = filterQuery(f); navigate('/' + (q ? '?' + q : ''));
   } else { void refreshBrowse(); }
 }
 function toggleGroup(g: string): void {
@@ -501,6 +504,7 @@ function nearbyCta(): HTMLElement {
 }
 function onPlaceLoaded(p: Place | null): void {
   currentPlace = p;
+  if (p) R.body.scrollTop = 0; // Karte beginnt oben, auch wenn der Inhalt erst nach dem Laden erscheint
   if (!p) { S.map?.setSelected(null); return; }
   S.map?.setSelected(p);
   setPlaceMeta(p);
@@ -614,6 +618,8 @@ function handleRoute(r: Route): void {
   }
   R.searchArea.hidden = true;
   R.app.dataset.view = r.name;
+  if (!pending) R.body.scrollTop = 0; // neue Ansicht beginnt oben (nicht in der Mitte der vorherigen)
+  requestAnimationFrame(() => S.map?.resize()); // Karte nach Seiten wie Einstellungen neu aufbauen
   switch (r.name) {
     case 'map':
       S.mode = 'browse'; S.res = null; S.was = ''; S.wo = ''; S.nearby = false; searchSeq++;
