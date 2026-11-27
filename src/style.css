@@ -411,3 +411,5 @@ h1, h2 { letter-spacing: -0.01em; }
 .app[data-sheet='peek'] .panel-body .back-btn { display: none; }
 /* RTL (Arabisch, Persisch, Hebräisch) */
 [dir='rtl'] .back-btn svg { transform: scaleX(-1); }
+
+.langs .radio { flex-wrap: wrap; } .langs .radio small { flex-basis: 100%; padding-inline-start: 34px; margin-top: -4px; }

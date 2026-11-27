@@ -619,7 +619,7 @@ function handleRoute(r: Route): void {
   R.searchArea.hidden = true;
   R.app.dataset.view = r.name;
   if (!pending) R.body.scrollTop = 0; // neue Ansicht beginnt oben (nicht in der Mitte der vorherigen)
-  requestAnimationFrame(() => S.map?.resize()); // Karte nach Seiten wie Einstellungen neu aufbauen
+  requestAnimationFrame(() => S.map?.refresh()); // Karte nach Seiten wie Einstellungen neu aufbauen
   switch (r.name) {
     case 'map':
       S.mode = 'browse'; S.res = null; S.was = ''; S.wo = ''; S.nearby = false; searchSeq++;
@@ -780,7 +780,8 @@ function refreshAll(): void {
   const map = S.map; const mapEl = R.mapEl;
   buildShell();
   R.mapEl.replaceWith(mapEl);
-  S.map = map; map?.resize();
+  R.mapEl = mapEl; // sonst zeigt R.mapEl beim nächsten Aufruf auf die verworfene Platzhalter-Fläche und die Karte geht verloren
+  S.map = map; map?.refresh();
   paintBanners(); handleRouteAgain();
 }
 function handleRouteAgain(): void {

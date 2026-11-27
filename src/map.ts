@@ -65,6 +65,11 @@ export class MapController {
     container.setAttribute('role', 'region');
     this.ready = new Promise((res) => this.map.once('load', () => res()));
     this.map.on('style.load', () => { void this.setupLayers(); });
+    const cv = this.map.getCanvas();
+    cv.addEventListener('webglcontextlost', (e) => { e.preventDefault(); }); // Wiederherstellung übernimmt MapLibre
+    cv.addEventListener('webglcontextrestored', () => { this.refresh(); });
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) this.refresh(); });
+    window.addEventListener('pageshow', () => { this.refresh(); });
     this.map.on('moveend', (e) => { this.events.onMoved(this.view(!!(e as { originalEvent?: unknown }).originalEvent)); });
     this.map.on('error', (e) => {
       const m = String((e as unknown as { error?: { message?: string } }).error?.message ?? '');
@@ -185,5 +190,12 @@ export class MapController {
     this.map.setStyle(theme === 'dark' ? TILE_PROVIDER.styleDark : TILE_PROVIDER.styleLight);
   }
   resize(): void { this.map.resize(); }
+  /** Karte nach Umhängen im DOM / Rückkehr in den Vordergrund neu aufbauen (iOS verwirft sonst den Zeichenpuffer: graue Fläche) */
+  refresh(): void {
+    this.map.resize();
+    this.map.triggerRepaint();
+    requestAnimationFrame(() => { this.map.resize(); this.map.triggerRepaint(); });
+    window.setTimeout(() => { this.map.resize(); this.map.triggerRepaint(); }, 400);
+  }
   get styleSpec(): StyleSpecification | undefined { return this.map.getStyle(); }
 }
