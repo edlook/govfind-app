@@ -94,7 +94,7 @@ function paintChips(): void {
     h('button', { class: ['chip', S.filters.subs.size ? '' : 'on'], type: 'button', 'aria-pressed': String(!S.filters.subs.size), onclick: () => A.setFilters({ ...S.filters, subs: new Set() }) }, t('filter.all')),
     GROUPS.map((g) => {
       const subs = subsOfGroup(g.slug); const sel = subs.filter((s) => S.filters.subs.has(s)).length;
-      const b = h('button', { class: ['chip', sel ? 'on' : ''], type: 'button', 'aria-pressed': sel === subs.length ? 'true' : sel ? 'mixed' : 'false', onclick: () => A.toggleGroup(g.slug) },
+      const b = h('button', { class: ['chip', sel ? 'on' : ''], type: 'button', 'aria-pressed': sel === subs.length ? 'true' : sel ? 'mixed' : 'false', onclick: () => selectGroupOnly(g.slug) },
         h('span', { class: 'dot' }), groupLabel(g.slug));
       (b.firstChild as HTMLElement).style.background = g.color;
       return b;
@@ -332,8 +332,11 @@ function searchHref(): string {
 }
 function setFilters(f0: Filters): void {
   const f = normFilters(f0);
+  const prev = S.filters.subs; const changed = f.subs.size > 0 && (f.subs.size !== prev.size || [...f.subs].some((x) => !prev.has(x)));
   S.filters = f; paintChips(); emit('filters');
   const r = getRoute();
+  // Kategorie gewählt: eingetippter Suchbegriff („Polizei“) würde sie ausblenden -> Begriff verwerfen (Ort / „In meiner Nähe“ bleibt)
+  if (changed && S.was && r.name === 'search') { S.was = ''; const q = new URLSearchParams(r.q); q.delete('was'); r.q.delete('was'); replaceQuery(r.path + (q.toString() ? '?' + q.toString() : '')); }
   if (r.name === 'map' || r.name === 'search') {
     const q = new URLSearchParams(r.q);
     for (const k of ['kat', 'hours', 'open', 'wc', 'r']) q.delete(k);
@@ -346,6 +349,11 @@ function toggleGroup(g: string): void {
   const subs = subsOfGroup(g); const all = subs.every((s) => S.filters.subs.has(s));
   const n = new Set(S.filters.subs); subs.forEach((s) => (all ? n.delete(s) : n.add(s)));
   setFilters({ ...S.filters, subs: n });
+}
+/** Obere Chips: genau eine Gruppe aktiv (wie Reiter); erneutes Tippen auf die aktive Gruppe = „Alle“ */
+function selectGroupOnly(g: string): void {
+  const subs = subsOfGroup(g); const only = S.filters.subs.size === subs.length && subs.every((x) => S.filters.subs.has(x));
+  setFilters({ ...S.filters, subs: only ? new Set() : new Set(subs) });
 }
 function toggleSub(s: string): void { const n = new Set(S.filters.subs); if (n.has(s)) n.delete(s); else n.add(s); setFilters({ ...S.filters, subs: n }); }
 

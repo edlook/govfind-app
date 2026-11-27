@@ -407,3 +407,7 @@ h1, h2 { letter-spacing: -0.01em; }
 .nav-end { min-height: 48px; padding: 0 22px; background: #d33; border-color: #d33; }
 .nav-recenter { position: absolute; z-index: 31; left: 12px; bottom: calc(96px + env(safe-area-inset-bottom)); box-shadow: var(--shadow); background: var(--bg2); }
 .app[data-nav] .map-ctl, .app[data-nav] .map-controls { bottom: calc(110px + env(safe-area-inset-bottom)); }
+/* Eingeklappte Schublade: nur Titel + Trefferzahl sichtbar (kein „Zurück“-Zeile), damit „N Ergebnisse“ nicht abgeschnitten wird */
+.app[data-sheet='peek'] .panel-body .back-btn { display: none; }
+/* RTL (Arabisch, Persisch, Hebräisch) */
+[dir='rtl'] .back-btn svg { transform: scaleX(-1); }

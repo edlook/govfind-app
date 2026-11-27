@@ -14,6 +14,7 @@ let current = 'de';
 let pr: Intl.PluralRules = new Intl.PluralRules('de');
 const listeners = new Set<() => void>();
 
+const RTL = new Set(['ar', 'fa', 'he']);
 export const getLang = (): string => current;
 export const onLangChange = (f: () => void): (() => void) => { listeners.add(f); return () => listeners.delete(f); };
 
@@ -27,7 +28,7 @@ export function detectLang(setting: string): string {
   const pick = (c: string): string | null => { const b = c.toLowerCase().split('-')[0]!; return LANGS.includes(b) ? b : null; };
   if (setting && setting !== 'system') return pick(setting) ?? 'de';
   for (const l of navigator.languages ?? [navigator.language]) { const p = pick(l); if (p) return p; }
-  return 'de';
+  return 'en'; // Telefonsprache nicht unterstützt: Englisch statt Deutsch
 }
 
 export async function setLang(code: string): Promise<void> {
@@ -36,6 +37,7 @@ export async function setLang(code: string): Promise<void> {
   current = c;
   pr = new Intl.PluralRules(c);
   document.documentElement.lang = c;
+  document.documentElement.dir = RTL.has(c) ? 'rtl' : 'ltr';
   listeners.forEach((f) => f());
 }
 
