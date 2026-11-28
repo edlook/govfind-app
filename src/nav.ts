@@ -62,7 +62,8 @@ export function startNavigation(o: NavOptions): void {
 
   let voice = true; try { voice = localStorage.getItem('gf.navvoice') !== '0'; } catch { /* ignore */ }
   let follow = true; let idx = 0; let off = 0; let along = 0; let me: LatLng | null = null; let lastFix = 0;
-  let rerouting = false; let lastReroute = 0; let arrived = false; let heading: number | null = null; let lastSpoken = '';
+  let rerouting = false; let lastReroute = 0; let arrived = false; let heading: number | null = null; let compass: number | null = null; let lastSpoken = ''; let lastSpokenAt = 0; let moved = false; let speed = 0; let lastCompassPaint = 0; let soundWarned = false;
+  const hd = (): number | null => (speed > 0.8 && heading !== null ? heading : compass ?? heading);
   const said = new Set<string>();
   let watchId = -1; let wake: { release: () => Promise<void> } | null = null;
 
@@ -73,9 +74,9 @@ export function startNavigation(o: NavOptions): void {
   const top = h('div', { class: 'nav-top', role: 'status', 'aria-live': 'off' }, arrow, h('div', { class: 'nav-main' }, distEl, textEl));
   const remEl = h('div', { class: 'nav-rem' }, '–');
   const etaEl = h('div', { class: 'nav-eta' }, '');
-  const voiceBtn = h('button', { class: 'btn nav-btn', type: 'button', onclick: () => { voice = !voice; try { localStorage.setItem('gf.navvoice', voice ? '1' : '0'); } catch { /* ignore */ } if (!voice) window.speechSynthesis?.cancel(); paintVoice(); } });
+  const voiceBtn = h('button', { class: 'btn nav-btn', type: 'button', onclick: () => { voice = !voice; try { localStorage.setItem('gf.navvoice', voice ? '1' : '0'); } catch { /* ignore */ } if (!voice) window.speechSynthesis?.cancel(); else speak(t('nav.voice_on')); paintVoice(); } });
   const paintVoice = (): void => { voiceBtn.replaceChildren(icon(voice ? 'volume' : 'volume-off', { size: 22 })); voiceBtn.setAttribute('aria-label', voice ? t('nav.voice_on') : t('nav.voice_off')); voiceBtn.setAttribute('aria-pressed', String(voice)); };
-  const recenter = h('button', { class: 'btn nav-recenter', type: 'button', hidden: true, onclick: () => { follow = true; recenter.hidden = true; if (me) S.map?.follow(me, heading, zoomFor()); } }, icon('locate', { size: 20 }), h('span', null, t('nav.recenter')));
+  const recenter = h('button', { class: 'btn nav-recenter', type: 'button', hidden: true, onclick: () => { follow = true; recenter.hidden = true; if (me) S.map?.follow(me, hd(), zoomFor()); } }, icon('locate', { size: 20 }), h('span', null, t('nav.recenter')));
   const endBtn = h('button', { class: 'btn btn-primary nav-end', type: 'button', onclick: () => stopNavigation() }, t('nav.end'));
   const bottom = h('div', { class: 'nav-bottom' }, h('div', { class: 'nav-sum' }, remEl, etaEl), voiceBtn, endBtn);
   paintVoice();
@@ -85,12 +86,41 @@ export function startNavigation(o: NavOptions): void {
 
   const zoomFor = (): number => (o.mode === 'car' ? 16.2 : 17.4);
   const speak = (text: string): void => {
-    if (!voice || !('speechSynthesis' in window) || text === lastSpoken) return;
-    lastSpoken = text;
-    try { const u = new SpeechSynthesisUtterance(text); u.lang = getLang() === 'de' ? 'de-DE' : 'en-GB'; u.rate = 1; window.speechSynthesis.cancel(); window.speechSynthesis.speak(u); } catch { /* ignore */ }
+    if (!voice || !('speechSynthesis' in window) || (text === lastSpoken && Date.now() - lastSpokenAt < 4000)) return;
+    lastSpoken = text; lastSpokenAt = Date.now();
+    try {
+      const u = new SpeechSynthesisUtterance(text); u.lang = getLang() === 'de' ? 'de-DE' : 'en-GB'; u.rate = 1;
+      u.onerror = () => { if (!soundWarned) { soundWarned = true; A.toast(t('nav.sound_hint'), { ms: 8000 }); } };
+      window.speechSynthesis.cancel(); window.speechSynthesis.speak(u);
+    } catch { /* ignore */ }
   };
   // Sprachausgabe auf iOS braucht eine Nutzeraktion: die Starttaste hat sie ausgelöst, stille Äußerung schaltet frei
   try { if (voice && 'speechSynthesis' in window) window.speechSynthesis.speak(new SpeechSynthesisUtterance(' ')); } catch { /* ignore */ }
+  // Stumm-Schalter am iPhone: ein (lautloser) Audio-Loop schaltet die Sitzung auf „Wiedergabe“, damit die Sprachausgabe hörbar wird
+  let silent: HTMLAudioElement | null = null; let silentUrl = '';
+  try {
+    const n = 4000; const buf = new Uint8Array(44 + n); const dv = new DataView(buf.buffer);
+    const w = (o: number, str: string): void => { for (let i = 0; i < str.length; i++) buf[o + i] = str.charCodeAt(i); };
+    w(0, 'RIFF'); dv.setUint32(4, 36 + n, true); w(8, 'WAVEfmt '); dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 1, true);
+    dv.setUint32(24, 8000, true); dv.setUint32(28, 8000, true); dv.setUint16(32, 1, true); dv.setUint16(34, 8, true); w(36, 'data'); dv.setUint32(40, n, true);
+    buf.fill(128, 44);
+    silentUrl = URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
+    silent = new Audio(silentUrl); silent.loop = true; silent.volume = 0.01; void silent.play().catch(() => undefined);
+  } catch { /* ignore */ }
+  // Kompass (iOS verlangt eine Freigabe per Tipp; Android liefert absolute Ausrichtung)
+  const onOrient = (e: Event): void => {
+    const ev = e as DeviceOrientationEvent & { webkitCompassHeading?: number };
+    let h: number | null = null;
+    if (typeof ev.webkitCompassHeading === 'number') h = ev.webkitCompassHeading;
+    else if (e.type === 'deviceorientationabsolute' && typeof ev.alpha === 'number') h = (360 - ev.alpha) % 360;
+    if (h === null || !Number.isFinite(h)) return;
+    compass = compass === null ? h : (compass + ((((h - compass) % 360) + 540) % 360 - 180) * 0.3 + 360) % 360; // geglättet, über 0°/360° hinweg
+    const now = Date.now();
+    if (speed <= 0.8 && now - lastCompassPaint > 350 && me) { lastCompassPaint = now; if (follow) S.map?.follow(me, hd(), zoomFor()); S.map?.setNavMarker(me, hd()); if (!moved) update(); }
+  };
+  const DOE = (window as unknown as { DeviceOrientationEvent?: { requestPermission?: () => Promise<string> } }).DeviceOrientationEvent;
+  const startCompass = (): void => { window.addEventListener('deviceorientationabsolute', onOrient, true); window.addEventListener('deviceorientation', onOrient, true); };
+  try { if (typeof DOE?.requestPermission === 'function') void DOE.requestPermission().then((r) => { if (r === 'granted') startCompass(); }).catch(() => undefined); else startCompass(); } catch { /* ignore */ }
 
   const draw = (): void => { S.map?.setRouteLines([{ coords: route.coords, kind: 'road' }]); };
   draw();
@@ -136,11 +166,26 @@ export function startNavigation(o: NavOptions): void {
         }
       }
     }
+    // Beginn der Route: Richtung ansagen (Kompass zeigt, wohin man zeigen soll)
+    if (along > 20) moved = true;
+    if (!moved && st && route.coords.length > 1) {
+      const c0 = route.coords[0]!; let k2 = 1; while (k2 < route.coords.length - 1 && cum[k2]! < 25) k2++;
+      const c1 = route.coords[k2]!;
+      const bear = (Math.atan2((c1[0] - c0[0]) * mPerLng(c0[1]), (c1[1] - c0[1]) * M_LAT) * 180 / Math.PI + 360) % 360;
+      const dirKeys = ['n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw'];
+      const dir = t('nav.dir.' + dirKeys[Math.round(bear / 45) % 8]!);
+      const street = route.steps[0]?.name;
+      const startText = street ? t('nav.start_dir_street', { dir, street }) : t('nav.start_dir', { dir });
+      textEl.textContent = startText;
+      arrow.style.transform = `rotate(${bear - (hd() ?? 0) - 45}deg)`; // relativ zur Kartenausrichtung
+      if (!said.has('start')) { said.add('start'); speak(`${t('nav.started')} ${startText}.`); }
+    }
+    S.map?.setNavMarker(me, hd());
     const frac = total > 0 ? remaining / total : 0;
     const remS = route.durationS * frac;
     remEl.textContent = t('nav.remaining', { time: fmtMin(remS), dist: distanceText(remaining / 1000) });
     etaEl.textContent = t('route.arrival', { time: fmtClock(Date.now() + remS * 1000) });
-    if (follow) S.map?.follow(me, heading, zoomFor());
+    if (follow) S.map?.follow(me, hd(), zoomFor());
   };
 
   const reroute = async (): Promise<void> => {
@@ -159,7 +204,7 @@ export function startNavigation(o: NavOptions): void {
 
   const onPos = (pos: GeolocationPosition): void => {
     me = { lat: pos.coords.latitude, lng: pos.coords.longitude }; S.userLoc = me; S.map?.setUser(me); S.geo = 'granted'; lastFix = Date.now();
-    const sp = pos.coords.speed;
+    const sp = pos.coords.speed; speed = typeof sp === 'number' && Number.isFinite(sp) ? sp : 0;
     heading = typeof pos.coords.heading === 'number' && Number.isFinite(pos.coords.heading) && (sp === null || sp > 0.8) ? pos.coords.heading : heading;
     update();
   };
@@ -178,6 +223,8 @@ export function startNavigation(o: NavOptions): void {
       active = null;
       navigator.geolocation.clearWatch(watchId); clearInterval(stale); document.removeEventListener('visibilitychange', onVis);
       void wake?.release().catch(() => undefined); window.speechSynthesis?.cancel(); offDrag?.();
+      window.removeEventListener('deviceorientationabsolute', onOrient, true); window.removeEventListener('deviceorientation', onOrient, true);
+      try { silent?.pause(); if (silentUrl) URL.revokeObjectURL(silentUrl); } catch { /* ignore */ }
       top.remove(); bottom.remove(); recenter.remove(); delete app.dataset.nav;
       S.map?.endFollow();
       o.onEnd();

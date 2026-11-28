@@ -413,3 +413,7 @@ h1, h2 { letter-spacing: -0.01em; }
 [dir='rtl'] .back-btn svg { transform: scaleX(-1); }
 
 .langs .radio { flex-wrap: wrap; } .langs .radio small { flex-basis: 100%; padding-inline-start: 34px; margin-top: -4px; }
+
+.nav-me { width: 48px; height: 48px; filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.35)); pointer-events: none; }
+.nav-me svg path { fill: #2563eb; stroke: #fff; stroke-width: 3; stroke-linejoin: round; }
+.nav-me.no-dir svg { transform: scale(0.45); }

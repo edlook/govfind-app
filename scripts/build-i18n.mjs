@@ -74,7 +74,11 @@ function main() {
     const sorted = Object.fromEntries(Object.entries(dict).sort(([a], [b]) => a.localeCompare(b)));
     writeFileSync(join(outDir, `${lang}.json`), JSON.stringify(sorted, null, 1) + '\n');
   }
+  // bestehende Einträge (weitere Sprachen) bleiben erhalten; nur de/en werden fest gesetzt
+  let prev = {};
+  try { prev = JSON.parse(readFileSync(join(outDir, '_meta.json'), 'utf8')); } catch { /* neu */ }
   const meta = {
+    ...prev,
     de: { name: 'Deutsch', machine_translated: false, reviewed: true },
     en: { name: 'English', machine_translated: false, reviewed: true },
     // Welle 2: bg, cs, da, el, es, et, fi, fr, ga, hr, hu, it, lt, lv, mt, nl, pl, pt, ro, sk, sl, sv

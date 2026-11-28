@@ -219,5 +219,18 @@
   "nav.remaining": "{time} · {dist}",
   "nav.done": "Fertig",
   "nav.no_gps": "Kein Standort verfügbar. Bitte Ortungsdienste erlauben.",
-  "nav.head": "Weiter auf der Route"
+  "nav.head": "Weiter auf der Route",
+  "nav.start_dir": "Los geht’s: Richtung {dir}",
+  "nav.start_dir_street": "Los geht’s: Richtung {dir} auf {street}",
+  "nav.dir.n": "Norden",
+  "nav.dir.ne": "Nordosten",
+  "nav.dir.e": "Osten",
+  "nav.dir.se": "Südosten",
+  "nav.dir.s": "Süden",
+  "nav.dir.sw": "Südwesten",
+  "nav.dir.w": "Westen",
+  "nav.dir.nw": "Nordwesten",
+  "nav.started": "Navigation gestartet.",
+  "nav.sound_hint": "Kein Ton? Stumm-Schalter am Gerät und Lautstärke prüfen.",
+  "nav.compass": "Kompass erlauben"
 }

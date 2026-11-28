@@ -1,4 +1,4 @@
-import { AttributionControl, Map as MLMap, setWorkerUrl, type GeoJSONSource, type MapGeoJSONFeature, type StyleSpecification } from 'maplibre-gl';
+import { AttributionControl, Map as MLMap, Marker, setWorkerUrl, type GeoJSONSource, type MapGeoJSONFeature, type StyleSpecification } from 'maplibre-gl';
 import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { GROUPS } from '../shared/taxonomy.js';
@@ -179,7 +179,21 @@ export class MapController {
     const o = { center: [c.lng, c.lat] as [number, number], zoom, padding: { top: 260, bottom: 40, left: 0, right: 0 }, ...(bearing !== null ? { bearing } : {}), pitch: 0 };
     if (this.reduce) this.map.jumpTo(o); else this.map.easeTo({ ...o, duration: 900, essential: true, easing: (x: number) => x });
   }
-  endFollow(): void { this.map.easeTo({ bearing: 0, pitch: 0, padding: { top: 0, bottom: 0, left: 0, right: 0 }, duration: this.reduce ? 0 : 400 }); }
+  private navMarker: Marker | null = null; private navEl: HTMLElement | null = null;
+  /** Navigation: eigene Positionsmarke mit Richtungspfeil (null = entfernen). bearing = Blickrichtung in Grad, null = nur Punkt */
+  setNavMarker(c: LatLng | null, bearing: number | null): void {
+    if (!c) { this.navMarker?.remove(); this.navMarker = null; this.navEl = null; return; }
+    if (!this.navMarker) {
+      const el = document.createElement('div'); el.className = 'nav-me';
+      const ns = 'http://www.w3.org/2000/svg'; const svg = document.createElementNS(ns, 'svg'); svg.setAttribute('viewBox', '0 0 48 48'); svg.setAttribute('width', '48'); svg.setAttribute('height', '48');
+      const path = document.createElementNS(ns, 'path'); path.setAttribute('d', 'M24 4 38 40 24 33 10 40z'); svg.append(path); el.append(svg);
+      this.navEl = el; this.navMarker = new Marker({ element: el, rotationAlignment: 'map', pitchAlignment: 'map' }).setLngLat([c.lng, c.lat]).addTo(this.map);
+    }
+    this.navMarker.setLngLat([c.lng, c.lat]);
+    this.navMarker.setRotation(bearing ?? 0);
+    this.navEl?.classList.toggle('no-dir', bearing === null);
+  }
+  endFollow(): void { this.setNavMarker(null, null); this.map.easeTo({ bearing: 0, pitch: 0, padding: { top: 0, bottom: 0, left: 0, right: 0 }, duration: this.reduce ? 0 : 400 }); }
   /** Meldet, wenn die Nutzenden die Karte selbst verschieben (Navigation pausiert das Folgen) */
   onUserDrag(cb: () => void): () => void { this.map.on('dragstart', cb); return () => { this.map.off('dragstart', cb); }; }
   zoomBy(d: number): void { this.map.easeTo({ zoom: this.map.getZoom() + d, duration: this.reduce ? 0 : 200 }); }

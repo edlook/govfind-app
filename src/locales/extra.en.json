@@ -219,5 +219,18 @@
   "nav.remaining": "{time} · {dist}",
   "nav.done": "Done",
   "nav.no_gps": "No location available. Please allow location services.",
-  "nav.head": "Continue on the route"
+  "nav.head": "Continue on the route",
+  "nav.start_dir": "Start heading {dir}",
+  "nav.start_dir_street": "Start heading {dir} on {street}",
+  "nav.dir.n": "north",
+  "nav.dir.ne": "northeast",
+  "nav.dir.e": "east",
+  "nav.dir.se": "southeast",
+  "nav.dir.s": "south",
+  "nav.dir.sw": "southwest",
+  "nav.dir.w": "west",
+  "nav.dir.nw": "northwest",
+  "nav.started": "Navigation started.",
+  "nav.sound_hint": "No sound? Check the silent switch and volume.",
+  "nav.compass": "Allow compass"
 }
